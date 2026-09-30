@@ -1,0 +1,10 @@
+name: mylanfiles_core
+description: >-
+  MyLanFiles core: protocol DTOs, VFS abstraction, path safety and the
+  universal search engine. Pure Dart, no Flutter dependency.
+publish_to: none
+environment:
+  sdk: ^3.11.0
+resolution: workspace
+dev_dependencies:
+  test: ^1.25.0
