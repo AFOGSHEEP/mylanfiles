@@ -8,3 +8,4 @@ workspace:
   - app
   - packages/localsend_isolates
   - packages/typed_isolates
+  - packages/mylanfiles_core

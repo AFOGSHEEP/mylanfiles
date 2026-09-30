@@ -1,0 +1,37 @@
+# MyLanFiles CI gate (separate file so upstream's own workflows stay untouched).
+# Scope: the mylanfiles_* Dart packages (pure Dart, fast on both runners).
+# Upstream app keeps localsend's own CI.
+name: mylanfiles-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [windows-latest, ubuntu-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: flutter-actions/setup-flutter@v4
+        with:
+          channel: stable
+          flutter-version: 3.41.9 # match upstream .fvmrc so the shared pub workspace resolves identically
+
+      - name: Pub get (workspace)
+        run: dart pub get
+
+      - name: Format
+        run: dart format --set-exit-if-changed packages/mylanfiles_core
+
+      - name: Analyze
+        run: dart analyze packages/mylanfiles_core
+
+      - name: Test
+        working-directory: packages/mylanfiles_core
+        run: dart test
