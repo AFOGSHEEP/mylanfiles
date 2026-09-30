@@ -2,81 +2,69 @@
 
 > 每次会话结束更新。结构：当前阶段 / 已完成 / 下一步 / 待决策人确认事项。
 
-- 更新：2026-09-30（P0 第 1 次会话）
-- 本机项目根：`F:\MyLanFiles`（spikes/ + docs/；正式 repo 尚未初始化——见"待确认"）
+- 更新：2026-09-30（P0 第 2 次会话——上接第 1 次会话的环境+spike）
+- 本机项目根：`F:\MyLanFiles`
+- 正式仓库：`F:\MyLanFiles\repo`（上游完整 clone；分支 `feat/p0-baseline` 4 个提交待推送）
 
 ## 当前阶段
 
-**P0 — 环境 + 链路验证**，进行中（约 3/6 项达成；三个侦察 spike 已完成 2 个全绿 + 1 个代码级）。
+**P0 — 环境 + 链路验证，接近完成**。剩余仅两件：GitHub 推送交接（等你一条命令）+ 真机互传/filebrowser 实测（需手机在场）。
 
-## 已完成（本次会话）
+## 第 2 次会话已完成
 
-1. **本机环境盘点**（避免重复下载）：
-   - 已有：Android Studio（F:\andoridStudio）、Android SDK（F:\SDK：platforms 36/36.1、build-tools 36.1/37.0、platform-tools/adb 37.0.0）、JDK 17（E:\JDK）、Git（E:\Git）、VS Code（F:）+ 已补装 Flutter/Dart 插件、Everything（E:\everything）、Chrome 未装（web 目标不需要）。
-   - 新装：**Flutter 3.47.5 stable**（F:\flutter，storage.flutter-io.cn 镜像）、Android cmdline-tools（F:\SDK\cmdline-tools\latest，dl.google.com 直连）、**melos 8.9.0**、licenses 已接受。
-   - `flutter doctor`：Flutter✅ Android✅ Windows 版本✅ 设备✅；剩 [X]Visual Studio（待确认）、[X]Chrome（忽略）。
-   - 环境变量（用户级，已永久）：PATH+=`F:\flutter\bin;F:\PubCache\bin`，`PUB_HOSTED_URL`/`FLUTTER_STORAGE_BASE_URL`/`PUB_CACHE=F:\PubCache`/`ANDROID_SDK(_ROOT)=F:\SDK`。
-2. **Spike 2（雷区2）✅ 全绿**：Dart FFI 调 WinRT 热点 API 成功（详见 spikes/spike02-winrt-hotspot/NOTES.md）。
-3. **Spike 1（雷区1）代码级 ✅**：LocalSend 加页面改动面极小；**发现上游 Rust 化**（R-002，B 级动摇，已上报待拍板）。
-4. **Spike 3（雷区3）静态 ✅**：flutter_blue_plus_windows 官方路线确认，依赖+analyze 通过（运行验证待 BuildTools）。
-5. 文档三件套建立：`docs/adr/0001`（fork 卫生 + trigram，含挂起项）、`docs/risks.md`（登记表+spike 结论）、本文件。
+1. **三件大件全部落位**：
+   - VS 2022 BuildTools 17.14.41（"使用 C++ 的桌面开发"，winget）→ flutter doctor 全绿
+   - Rust 1.98.1 stable-msvc + 上游钉住的 1.97.1（rsproxy 镜像；crates.io 已配 rsproxy 源）
+   - Windows 开发者模式已开启（UAC 通过）
+2. **两条 Windows 构建链打通**：
+   - spike03 BLE：`flutter build windows --debug` 51.7s 成功（win_ble 插件链验证）；本机有蓝牙适配器
+   - **上游 LocalSend：`√ Built localsend_app.exe`（含 Rust cargokit 链 + 探针页），已启动运行确认不崩**（Spike 1 运行级通过；探针按钮在"发送"页底部）
+3. **架构选项 A 拍板落地**：ADR-0002 定案；`packages/mylanfiles_core` 骨架 + **PathGuard 路径安全模块**（§7 生命线第一块）+ 17 个表驱动安全测试全绿（穿越/绝对路径注入/UNC/verbatim/大小写折叠/信息泄露）
+4. **两个可上游化的构建修复**（已进 fork，`fix(windows)` 提交）：
+   - 中文 Windows 代码页 936 → C4819 警告当错误 → CMake 加 `/utf-8`
+   - 上游 gitignore 的 `localsend_msix_helper.msix` 被 CMake 无条件安装 → 新 clone 必失败 → 改条件安装
+5. **正式仓库就绪**：`feat/p0-baseline` 分支 4 个提交（core 骨架 / 探针页 / 构建修复 / docs+CI），CI 门禁 yml 就位（windows+ubuntu 双 runner：format+analyze+test）。
 
-## 下一步（下次会话，按优先序）
+## 踩雷记录（本次）
 
-1. **等决策人**：架构选项 A/B/C（R-002）+ 三件大件安装确认（见下）→ 装 VS BuildTools + Rust + 开发者模式。
-2. 补 Spike 1/3 运行级验证（`flutter run -d windows` 各跑一次；S3 需 BLE 外设/手机配合）。
-3. P0 剩余验收：上游互传双端跑通（含插 Android 真机）、热点 + filebrowser 零代码链路实测、CI + 分支保护。
-4. （若选项 A 批准）`packages/mylanfiles_core` 骨架 + 路径安全测试先行（P1 首任务预备）。
+| 雷 | 处置 |
+|----|------|
+| rsproxy 的 `RUSTUP_UPDATE_ROOT` 路径 404（cargokit 自更新失败） | 正确值是 `https://rsproxy.cn/rustup`（**不带** `/dist`；官方文档写法有误），已写入环境约定 |
+| C4819（CP936 × UTF-8 源码）构建失败 | CMake `add_compile_options(/utf-8)`（`CL` 环境变量对 MSBuild 链无效） |
+| msix helper 缺失 → INSTALL 步骤失败 | 条件安装补丁 |
+| gh 的 winget 安装挂死 | 直接下 GitHub release zip → `F:\bin\gh.exe` |
 
-## 待决策人确认事项（按重要性排序）
+## 待决策人确认事项
 
-### 1. 架构路线（R-002，阻塞 P1 开工）——**需拍板**
+### 1. GitHub 推送交接（只剩这一步，命令备好）
 
-上游 `packages/core` 已是 Rust crate。选 **A**（新建 Dart 包 `mylanfiles_core`/`mylanfiles_server`，与上游 Rust 平行，AI 推荐）/ **B**（跟随 Rust+FRB）/ **C**（自建壳复用 Rust core）。详见 risks.md R-002。
-
-### 2. 大型依赖安装清单（约 3-4GB 磁盘 + 下载流量）——**需确认**
-
-| 项 | 大小 | 用途 | 安装方式（国内镜像，无代理） |
-|----|------|------|------------------------------|
-| VS 2022 Build Tools + "使用 C++ 的桌面开发"负载 | ~2-3GB | flutter run -d windows 必需 | `winget install Microsoft.VisualStudio.2022.BuildTools --override "--add Microsoft.VisualStudio.Workload.VCTools --includeRecommended"`（或官方离线 iso） |
-| Rust 工具链（rustup + stable-msvc） | ~500MB-1GB | 上游 app 构建含 cargokit Rust 编译（任何架构选项都需要） | rsproxy.cn 下载 rustup-init.exe，设 `RUSTUP_DIST_SERVER=https://rsproxy.cn`、`RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup/dist` 后 `rustup default stable-msvc`；crates.io 换 rsproxy 源 |
-
-### 3. Windows 开发者模式——**需一次性手动操作**（10 秒）
-
-设置 → 系统 → 开发者选项 → 开；或管理员执行：
-`reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f`
-（解锁 Flutter 插件 symlink；不开则每次构建都要管理员权限）
-
-### 4. GitHub 仓库初始化方案——**fork 前需过目**
+在任意终端跑（gh 在 `F:\bin\gh.exe`）：
 
 ```
-推荐方案（fork 模式）：
-1. GitHub 上 fork localsend/localsend → <你的账号>/mylanfiles（保留 fork 关系，
-   便于日后向上游提 bug fix PR；Apache-2.0 合规自动体现在 LICENSE 文件保留）
-2. 本地：git clone https://github.com/<你>/mylanfiles F:\MyLanFiles\repo
-   cd repo && git remote add upstream https://github.com/localsend/localsend.git
-3. 把本次 P0 产物（docs/、spikes/ 的 NOTES）作为首个分支 feat/p0-baseline 并入
-4. CI：.github/workflows/ci.yml（dart format --set-exit-if-changed + dart analyze
-   + flutter test；matrix: windows-latest + ubuntu-latest）+ 分支保护（CI 绿才可合并）
-5. 分支模型：main 跟随（每月 merge upstream）；功能走 <3 天短命分支 + PR + squash
-
-备选（import 模式）：GitHub 建空仓 mylanfiles，把上游 clone 推上去 + upstream remote。
-区别：fork 模式在 GitHub 侧有 fork 标记（star/PR 生态友好）；import 模式仓库更"干净"
-（不会有 fork 网络的约束）。
+F:\bin\gh.exe auth login --hostname github.com
+# 选 HTTPS → Login with a web browser → 浏览器输设备码
 ```
 
-**注意**：在架构选项（事项 1）拍板前，不向仓库推送任何 `packages/*` 业务代码——P0 产物（docs/spikes）不受影响。
+完成后告诉我，我接手剩下的全自动：fork localsend/localsend → 改名 mylanfiles → 设 origin → push `feat/p0-baseline` → 开 PR → main 分支保护（mylanfiles-ci 必须绿）。
+（或你想直接粘贴 PAT 也行，用后我会提醒你撤销。）
 
-### 5. P0 收尾需要用户在场的两项
+### 2. 需要你在场的 P0 收尾（手机）
 
-- 插入 Android 真机（USB 调试开）跑一次上游互传验收；
-- 电脑开热点 + 手机浏览器访问 filebrowser（届时我先在 F 盘部署 filebrowser 单二进制）。
+- Android 真机开 USB 调试插上 → 上游 App 双端互传一次（P0 验收）
+- 电脑开热点 + 手机浏览器 → filebrowser 基准线体验（filebrowser 单二进制我随时可部署）
 
-## 环境速查（下次会话直接用）
+## 下次会话计划
 
-- Flutter：`F:\flutter`（3.47.5）；pub 缓存 `F:\PubCache`；melos 8.9.0
-- Android SDK：`F:\SDK`（ANDROID_HOME 已设）；adb=`F:\SDK\platform-tools\adb.exe`（未入 PATH，可用完整路径）
-- 项目：`F:\MyLanFiles`（docs/ 本文档 + spikes/ 三个 spike + 两份原始文档拷贝）
-- 上游代码：`F:\MyLanFiles\spikes\spike01-localsend-page\upstream`（含探针页改动，未推送任何远端）
-- 镜像：SDK=storage.flutter-io.cn，pub=pub.flutter-io.cn，pip=清华，rust=rsproxy.cn（待装）
-- 约束：全程不使用代理（用户 dsh 记忆 + 本次会话指示）
+1. （若已 auth）fork + push + PR + 分支保护 → **P0 关账**
+2. 真机互传 + filebrowser 实测 → P0 验收全勾
+3. **P1 开工**：`mylanfiles_core` 协议 DTO + VFS 接口（PathGuard 已就位）→ `mylanfiles_server`（shelf+TLS）→ 双端最小浏览闭环
+
+## 环境速查（累积更新）
+
+- Flutter `F:\flutter`（3.47.5）；pub 缓存 `F:\PubCache`；melos、gh(`F:\bin\gh.exe`)
+- Android SDK `F:\SDK`；adb `F:\SDK\platform-tools\adb.exe`
+- Rust：stable 1.98.1 + 1.97.1（上游钉版）；`~/.cargo/config.toml` 已配 rsproxy
+- **构建 LocalSend 的环境变量**（bash）：`PATH+=~/.cargo/bin`，`RUSTUP_DIST_SERVER=https://rsproxy.cn`，`RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup`，PUB/FLUTTER 镜像，`ANDROID_SDK_ROOT=F:\SDK`
+- 项目：`F:\MyLanFiles`（docs/ + spikes/ + repo/）
+- 上游代码两份：`spikes\spike01-localsend-page\upstream`（已构建✅，探针页）、`repo`（正式仓库，同补丁）
+- 约束：全程无代理

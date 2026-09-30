@@ -15,38 +15,37 @@
 
 ## 二、问题登记表
 
-### R-002（⚠ 动摇 B 级）上游 LocalSend 架构已 Rust 化
+### R-002（✅ 已拍板：选项 A）上游 LocalSend 架构已 Rust 化
 
 - **现象**：clone 上游后发现 `packages/core` 是 Rust crate（crypto/discovery/http server+client/multicast/webrtc，75 个 .rs 文件），app 经 `packages/localsend_isolates`（flutter_rust_bridge + cargokit）调用；Dart 侧（app/lib 272 文件）主要是 UI/provider。上游自带 AGENTS.md 确认此布局。
 - **根因**：交接文档调研快照（§9.14 "79.6% Dart"）已过时，上游此后完成了协议层 Rust 迁移。
 - **影响**：B 级决策"新代码只进 `packages/core`、`packages/server`"的路径假设失效——`packages/core` 名字被占用，且若走 Rust 路线，shelf/FTS5/Everything 等 Dart 生态设计（§4）都要换栈。
-- **候选解法**（**需决策人拍板，AI 不自行定**）：
+- **决策（2026-09-30）**：**选项 A** —— 新建 `packages/mylanfiles_core`/`mylanfiles_server` 与上游 Rust 平行，详见 docs/adr/0002。以下候选留档：
   - **A（AI 倾向）**：新建 Dart 包 `packages/mylanfiles_core` + `packages/mylanfiles_server`（shelf+TLS），与上游 Rust 平行。自研浏览/VFS/搜索全 Dart；上游 Rust 只服务原互传功能。+：贴文档技术栈与全部既有设计；fork 卫生最佳。-：放弃复用上游 Rust 协议层；产物带双 runtime。
   - **B**：新协议层跟随上游写 Rust（FRB 桥）。+：单语言协议层。−：Rust+cargokit+FRB 学习/维护成本，Dart 生态设计全部重做。
   - **C**：Route B 自建壳，仅复用上游 Rust core。+：壳干净。−：同样绑 Rust 栈，且丢掉上游 UI。
 - **登记时间**：2026-09-30（Spike 1）。
 
-### R-001 本机缺 VS C++ BuildTools（"使用 C++ 的桌面开发"负载）
+### R-001（✅ 已解除）本机缺 VS C++ BuildTools（"使用 C++ 的桌面开发"负载）
 
 - **现象**：`flutter doctor` `[X] Visual Studio - develop Windows apps`；F:\VisualStudioPackages 只是安装包缓存，无实际 VS。
 - **影响**：`flutter run -d windows` 不可构建 → S1/S3 的运行级验证、P0 "clone 上游跑通 Windows 互传" 验收全部阻塞。
-- **解法**：**待决策人确认安装**（下载 ~2-3GB，走 winget/官方离线包）。
+- **解法**：✅ 已装（VS 2022 BuildTools 17.14.41 + C++ 桌面负载，winget，2026-09-30 会话 2）。flutter doctor 全绿。
 - **是否动摇 B 级**：否（纯环境）。
 
-### R-003 Windows 开发者模式未开启
+### R-003（✅ 已解除）Windows 开发者模式未开启
 
 - **现象**：`flutter pub get` 报 "Building with plugins requires symlink support"；UAC 提权尝试被取消（无人值守）。
 - **根因**：Flutter 插件在 Windows 上创建 symlink 需要开发者模式（或管理员每次运行）。
 - **影响**：带 plugin 的项目（上游 app、S3 PoC）pub get/构建受阻；**绕过**：workspace 根 `dart pub get` 可完成依赖解析+analyze（已用此法完成 S1/S3 静态验证）。
-- **解法**：设置→系统→开发者选项开启；或管理员运行
-  `reg add HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\AppModelUnlock /v AllowDevelopmentWithoutDevLicense /t REG_DWORD /d 1 /f`。**需用户一次性操作**。
+- **解法**：✅ 已开启（会话 2 经 UAC 注册表写入并验证 `0x1`）。flutter pub get 的 plugin symlink 正常。
 - **是否动摇 B 级**：否。
 
-### R-004 本机无 Rust 工具链
+### R-004（✅ 已解除）本机无 Rust 工具链
 
 - **现象**：`cargo` 不在 PATH；上游构建链含 cargokit（Flutter 构建时编译 `packages/localsend_isolates/rust`，锁 rust-toolchain.toml）。
 - **影响**：无论架构选项 A/B/C，只要构建上游 app（Windows/Android 产物含 Rust 编译），本机就需要 Rust。选项 A 也需要（上游 app 的互传功能仍在）。
-- **解法**：**待确认后安装**（rustup，国内镜像 `rsproxy.cn`，约 500MB；msvc target 需先有 R-001 的 BuildTools）。
+- **解法**：✅ 已装（stable 1.98.1 + 上游钉版 1.97.1，rsproxy 镜像；crates.io 走 rsproxy sparse 源）。cargokit 链实测通过（localsend_app.exe 构建成功）。
 - **是否动摇 B 级**：否（环境），但加重 A 选项的"双栈"成本论据。
 
 ### R-005 国内镜像可用性笔记（环境情报，非风险项）
@@ -70,6 +69,9 @@
 | E1 | Git Bash GNU tar 不认 zip，SDK 解压失败 | 换 `unzip`；顺手教训：Windows 下 zip 一律 unzip/PowerShell |
 | E2 | win32 包 vtable 约定踩坑（`lpVtbl.value[n]` 双重解引用→崩溃；`asFunction` 泛型不能运行时传；跨行泛型解析歧义） | 已写进 S2 NOTES 的方法论，后续 WinRT 绑定照抄 |
 | E3 | flutter create 模板 test 引用被删类 + pubspec 依赖插错段 | 已修（S3） |
+| E4 | rsproxy 的 `RUSTUP_UPDATE_ROOT` 404（cargokit rustup 自更新挂掉） | 正确值 `https://rsproxy.cn/rustup`（不带 /dist，官方文档写法有误）；已固化进环境约定 |
+| E5 | 中文 Windows 代码页 936：C4819 警告当错误，connectivity_plus 编译失败（`CL=/utf-8` 环境变量对 MSBuild 链无效） | CMake `add_compile_options(/utf-8)` 补丁（已进 fork，可上游化） |
+| E6 | 上游 `localsend_msix_helper.msix` 被 gitignore 但 CMake 无条件安装 → 新 clone INSTALL 步骤必失败 | 条件安装补丁（已进 fork，可上游化） |
 
 ## 四、P0 尚未完成的验收项（依赖待确认清单）
 
