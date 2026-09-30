@@ -9,3 +9,4 @@ workspace:
   - packages/localsend_isolates
   - packages/typed_isolates
   - packages/mylanfiles_core
+  - packages/mylanfiles_server

@@ -46,6 +46,9 @@ class PathGuard {
     }
     var s = requested.replaceAll('\\', '/');
     if (s.startsWith('//?/')) s = s.substring(4); // Windows verbatim prefix
+    if (s.replaceAll('/', '').isEmpty) {
+      return root; // "/" or "//" etc. — the client asked for the root itself
+    }
     // Anchor to the shared root unless the request itself is absolute;
     // absolute requests are accepted as-is and must survive containment.
     final joined = _isAbsoluteRequest(s) ? s : '$root/$s';
@@ -82,8 +85,7 @@ class PathGuard {
 
   String _comparable(String p) => caseSensitive ? p : p.toLowerCase();
 
-  static bool _isAbsoluteRequest(String s) =>
-      _hasDrive(s) || s.startsWith('/');
+  static bool _isAbsoluteRequest(String s) => _hasDrive(s) || s.startsWith('/');
 
   /// Normalizes the trusted root: separators, dot segments, no trailing sep,
   /// POSIX leading slash / drive letter preserved.
@@ -108,8 +110,6 @@ class PathGuard {
       p.length >= 2 &&
       p.codeUnitAt(1) == 58 /* : */ &&
       _isLetter(p.codeUnitAt(0));
-
-  static bool _isPosixAbsolute(String p) => p.startsWith('/');
 
   static bool _isDriveComponent(String c) =>
       c.length == 2 && c.endsWith(':') && _isLetter(c.codeUnitAt(0));
