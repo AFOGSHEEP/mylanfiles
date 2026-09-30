@@ -36,7 +36,7 @@
 
 ## 待决策人确认事项
 
-### 1. GitHub 推送交接（只剩这一步，命令备好）
+### 1. GitHub 推送（决策人指示：本轮暂缓，命令保留备用）
 
 在任意终端跑（gh 在 `F:\bin\gh.exe`）：
 
@@ -53,11 +53,13 @@ F:\bin\gh.exe auth login --hostname github.com
 - Android 真机开 USB 调试插上 → 上游 App 双端互传一次（P0 验收）
 - 电脑开热点 + 手机浏览器 → filebrowser 基准线体验（filebrowser 单二进制我随时可部署）
 
-## 下次会话计划
+## 下次会话计划（P1 继续，按 §2.5 垂直切片加宽）
 
-1. （若已 auth）fork + push + PR + 分支保护 → **P0 关账**
-2. 真机互传 + filebrowser 实测 → P0 验收全勾
-3. **P1 开工**：`mylanfiles_core` 协议 DTO + VFS 接口（PathGuard 已就位）→ `mylanfiles_server`（shelf+TLS）→ 双端最小浏览闭环
+1. **App 内第一个浏览页**：新页面（fork 新文件）→ 调本机 MlfServer → 文件树 + 点击下载到「收件箱」——把本段的 HTTP 闭环接进 UI
+2. 配对指纹与 TLS 打通真实链路（App 端生成/展示二维码，证书指纹入 QR）
+3. 打包流（§4.2 帧格式）+ 大文件 Range 断点联调
+4. Android 侧：MANAGE 权限引导页 + MediaStore 快路径通道（等真机）
+5. （决策人随时可恢复 GitHub 推送，交接命令见下）
 
 ## 环境速查（累积更新）
 
