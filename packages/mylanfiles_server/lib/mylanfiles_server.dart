@@ -4,5 +4,6 @@
 library;
 
 export 'src/auth.dart';
+export 'src/client.dart';
 export 'src/server.dart';
 export 'src/tls_context.dart';
