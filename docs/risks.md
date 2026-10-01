@@ -70,6 +70,13 @@
 - **解法**：✅ 已 pin `flutter_rust_bridge: 2.12.0`（精确版本）+ 重新解析 lock，`fix(deps)` 提交；debug 冒烟复测 0 个 init 错误。教训：**凡提交生成代码的包，依赖约束一律精确 pin**（cargokit/FRB 类桥接尤甚）。
 - **是否动摇 B 级**：否（上游集成层问题）。
 
+### R-009（⚠️ 约束变更，已按决策人口头指示执行）「不开模拟器」调整为「模拟器做功能面，性能/OEM 验收留真机」
+
+- **背景**：交接文档 §3 明确「不开模拟器」。2026-10-01 决策人主动提出「用虚拟机」代替真机在场，以解除开发阻塞。
+- **调整后口径**：Android 模拟器承担**功能面**（Android 构建链 bring-up、权限引导页、MediaStore、配对/浏览/打包/断点全链路 E2E、上游互传功能验证）；以下各项**模拟器数据不可信**，仍留真机：雷区 #5（打包流 29× 增益，依赖真实 Wi-Fi RTT，虚拟网卡 RTT≈0）、雷区 #6（OEM 杀后台，模拟器是 AOSP）、热点场景、相机扫 QR、BLE、Windows 防火墙 LAN 入站规则（模拟器流量经 qemu 走宿主内部，不触发真实入站）。P0 验收「-d 安卓机互传」：模拟器过功能，真机补测章。
+- **本机可行性探测（2026-10-01）**：`HypervisorPresent=True`（WHPX 加速可用；此时 VT-firmware 显示 False 属正常，VT 已被 Hyper-V 接管）；`F:\SDK` 已有 emulator 主程序/JDK17/build-tools 36/37/platforms android-36；**缺** system-images、NDK（cargokit Rust Android 构建必需），共约 2–3GB，dl.google.com 直连可下；无 AVD（avdmanager 现建）。F 盘余 35GB，充足。注意：模拟器是 x86_64 镜像，Rust 需加 `x86_64-linux-android` target（真机再补 `aarch64-linux-android`），rustup 走 rsproxy。
+- **是否动摇 B 级**：否（验收手段调整，验收项本身不变）。
+
 ### R-008 Windows 首次 anyIPv4 TLS bind 触发防火墙放行（预期内，非意外雷）
 
 - **现象**：浏览页服务端从 loopback 改绑 `InternetAddress.anyIPv4`（§4.1 LAN 可达所需），debug exe 首次 bind 时 Windows 防火墙可能弹放行对话框；拒绝则 LAN 对端连不上、loopback 演示不受影响。
