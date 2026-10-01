@@ -53,13 +53,13 @@ F:\bin\gh.exe auth login --hostname github.com
 - Android 真机开 USB 调试插上 → 上游 App 双端互传一次（P0 验收）
 - 电脑开热点 + 手机浏览器 → filebrowser 基准线体验（filebrowser 单二进制我随时可部署）
 
-## 下次会话计划（P1 继续，按 §2.5 垂直切片加宽）
+## 下次会话计划（P1 继续）
 
-1. **App 内第一个浏览页**：新页面（fork 新文件）→ 调本机 MlfServer → 文件树 + 点击下载到「收件箱」——把本段的 HTTP 闭环接进 UI
-2. 配对指纹与 TLS 打通真实链路（App 端生成/展示二维码，证书指纹入 QR）
-3. 打包流（§4.2 帧格式）+ 大文件 Range 断点联调
-4. Android 侧：MANAGE 权限引导页 + MediaStore 快路径通道（等真机）
-5. （决策人随时可恢复 GitHub 推送，交接命令见下）
+1. **TLS 真接**：浏览页改走 https（自签身份已在 server 包）+ 二维码配对（证书指纹入 QR，复用上游 qr 组件）
+2. **打包流接进浏览页**：多选 → 中位文件 <2MB 走 /api/v1/pack → 客户端解包落盘（PackStreamReader 就绪）；skip 断点续传演示
+3. **传输队列 + 进度 UI**；大文件 Range 断点联调
+4. Android 侧：MANAGE 权限引导页 + MediaStore 快路径（等真机）
+5. （GitHub 推送随时可恢复，交接命令见下）
 
 ## 环境速查（累积更新）
 
