@@ -62,6 +62,20 @@
 - **解法**：用户插入真机并开 USB 调试（P0 收尾时）。
 - **是否动摇 B 级**：否。
 
+### R-007（✅ 已解除）flutter_rust_bridge 运行时/代码生成版本漂移，上游 Rust 桥 init 失败
+
+- **现象**（P1 第 2 次会话冒烟测试发现）：debug 构建启动即打 `[SEVERE] [Init] Error during init — rust_lib_localsend_app's codegen version (2.12.0) should be the same as runtime version (2.13.0)`。app 不崩（init 错误被上游吞掉继续跑），但 **Rust 协议层（上游互传的全部功能）运行期不可用**。
+- **根因**：`packages/localsend_isolates/pubspec.yaml` 用 caret 约束 `flutter_rust_bridge: ^2.12.0`，而已提交的生成代码 `frb_generated.dart` 是 2.12.0 codegen 产物；P0 会话提交的 `pubspec.lock` 解析到了 2.13.0（caret 放行），运行时 sanity check 失败。**属上游依赖约束与提交产物不一致，非本会话引入**（HEAD 的 lock 里就是 2.13.0）。
+- **影响**：直接撞 P0 验收项「上游 App 双端互传一次」——真机测试前必须修。MyLanFiles 自研功能纯 Dart（ADR-0002），不受影响。
+- **解法**：✅ 已 pin `flutter_rust_bridge: 2.12.0`（精确版本）+ 重新解析 lock，`fix(deps)` 提交；debug 冒烟复测 0 个 init 错误。教训：**凡提交生成代码的包，依赖约束一律精确 pin**（cargokit/FRB 类桥接尤甚）。
+- **是否动摇 B 级**：否（上游集成层问题）。
+
+### R-008 Windows 首次 anyIPv4 TLS bind 触发防火墙放行（预期内，非意外雷）
+
+- **现象**：浏览页服务端从 loopback 改绑 `InternetAddress.anyIPv4`（§4.1 LAN 可达所需），debug exe 首次 bind 时 Windows 防火墙可能弹放行对话框；拒绝则 LAN 对端连不上、loopback 演示不受影响。
+- **处置**：交接文档 §8 坑 1 已有预案（为调试产物加专用网络入站放行）；留待真机联调会话与用户一起过 UAC。
+- **是否动摇 B 级**：否。
+
 ## 三、已关闭（本次会话处理完的雷）
 
 | # | 雷 | 处置 |
