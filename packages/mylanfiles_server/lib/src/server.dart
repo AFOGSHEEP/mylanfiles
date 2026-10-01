@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 import 'dart:io'
     show
         FileSystemException,
@@ -8,6 +9,7 @@ import 'dart:io'
         InternetAddress,
         SecurityContext;
 
+import 'package:crypto/crypto.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:shelf/shelf.dart';
 import 'package:shelf/shelf_io.dart' as shelf_io;
@@ -57,7 +59,8 @@ class MlfServer {
       ..get('/api/v1/fs/list', _list)
       ..get('/api/v1/fs/read', _read)
       ..put('/api/v1/fs/write', _write)
-      ..post('/api/v1/fs/op', _op);
+      ..post('/api/v1/fs/op', _op)
+      ..post('/api/v1/pack', _pack);
     return const Pipeline().addMiddleware(_auth()).addHandler(router.call);
   }
 
@@ -253,6 +256,55 @@ class MlfServer {
     } on VfsIsDirException {
       return _conflict('is a directory');
     }
+  }
+
+  /// POST /api/v1/pack  body={items:[path...], skip:[sha256hex...]}
+  /// → 连续帧流（§4.2），已存在（sha 命中 skip）的文件不出帧。
+  Future<Response> _pack(Request req) async {
+    Map<dynamic, dynamic> body;
+    try {
+      body = jsonDecode(await req.readAsString()) as Map<dynamic, dynamic>;
+    } on FormatException {
+      return Response(400, body: jsonEncode({'error': 'bad json'}));
+    }
+    final items = (body['items'] as List?)?.cast<String>() ?? const [];
+    final skip = (body['skip'] as List?)?.cast<String>().toSet() ?? <String>{};
+
+    // Eager validation: all items must resolve to files inside the root,
+    // otherwise the error would surface after the 200 went out.
+    final entries = <FsEntry>[];
+    for (final item in items) {
+      try {
+        final entry = await _vfs.stat(item);
+        if (entry.isDir) {
+          return _conflict('pack item is a directory: $item');
+        }
+        entries.add(entry);
+      } on PathAccessException {
+        return _forbidden();
+      } on VfsNotFoundException {
+        return _notFound();
+      }
+    }
+
+    Stream<List<int>> frames() async* {
+      for (final entry in entries) {
+        // Pass 1: hash while streaming (never buffer the whole file).
+        final digest = sha256.bind(_vfs.read(entry.path));
+        final sha = (await digest.first).bytes as Uint8List;
+        if (skip.contains(toHex(sha))) {
+          continue; // §4.2: 文件粒度断点——已有则整帧不发
+        }
+        yield encodeFrameHeader(entry.name, entry.size, sha);
+        yield* _vfs.read(entry.path);
+      }
+      yield encodeStreamEnd();
+    }
+
+    return Response.ok(
+      frames(),
+      headers: {'content-type': 'application/octet-stream'},
+    );
   }
 
   // ---- helpers ----

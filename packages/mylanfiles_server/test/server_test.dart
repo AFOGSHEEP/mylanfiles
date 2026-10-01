@@ -1,6 +1,7 @@
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:crypto/crypto.dart';
 import 'package:http/http.dart' as http;
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:mylanfiles_server/mylanfiles_server.dart';
@@ -163,6 +164,66 @@ void main() {
           ..body = jsonEncode({'op': 'format_c', 'args': {}}),
       );
       expect(res.statusCode, 400);
+    });
+  });
+
+  group('pack stream (§4.2)', () {
+    Future<http.StreamedResponse> pack(
+      List<String> items, {
+      Set<String> skip = const {},
+    }) => client.send(
+      _authed('POST', '/api/v1/pack')
+        ..body = jsonEncode({'items': items, 'skip': skip.toList()}),
+    );
+
+    String shaOfFile(String path) =>
+        sha256.convert(File('${tmp.path}/$path').readAsBytesSync()).toString();
+
+    test('streams multiple files as frames, respects skip', () async {
+      await File('${tmp.path}/p1.txt').writeAsString('pack-one');
+      await File(
+        '${tmp.path}/p2.bin',
+      ).writeAsBytes(List.generate(70000, (i) => i % 256));
+      await File('${tmp.path}/中文包.txt').writeAsString('中文字段名');
+
+      final skipped = shaOfFile('p2.bin');
+      final res = await pack(['p1.txt', 'p2.bin', '中文包.txt'], skip: {skipped});
+      expect(res.statusCode, 200);
+
+      final all = await http.Response.fromStream(res);
+
+      Future<void> consume(PackStreamReader reader) async {
+        final r1 = await reader.next();
+        expect(r1!.name, 'p1.txt');
+        expect(
+          utf8.decode(await r1.data.expand((c) => c).toList()),
+          'pack-one',
+        );
+        final r2 = await reader.next();
+        expect(r2!.name, '中文包.txt');
+        expect(r2.shaHex, shaOfFile('中文包.txt'));
+        await r2.data.drain<void>(); // data must be consumed before next()
+        expect(await reader.next(), isNull); // terminator only after skips
+      }
+
+      await consume(PackStreamReader(Stream.value(all.bodyBytes)));
+    });
+
+    test('all-skipped stream is just the terminator', () async {
+      await File('${tmp.path}/only.txt').writeAsString('x');
+      final res = await pack(['only.txt'], skip: {shaOfFile('only.txt')});
+      final reader = PackStreamReader(res.stream);
+      expect(await reader.next(), isNull);
+    });
+
+    test('directory item → 409', () async {
+      await Directory('${tmp.path}/pdir').create();
+      expect((await pack(['pdir'])).statusCode, 409);
+    });
+
+    test('traversal item is rejected before streaming', () async {
+      final res = await pack(['../escape.txt']);
+      expect(res.statusCode, 403);
     });
   });
 
