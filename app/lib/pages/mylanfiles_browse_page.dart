@@ -3,16 +3,21 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import 'package:http/http.dart' as http;
+import 'package:flutter/services.dart';
+import 'package:localsend_app/pages/mylanfiles/transfer_queue.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:mylanfiles_server/mylanfiles_server.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:pretty_qr_code/pretty_qr_code.dart';
 
-/// MyLanFiles 浏览页（P1 垂直切片 2）：
-/// - 「本机服务」：以下载目录为共享根起 MlfServer（loopback，开发期 http）
-/// - 「连接远程」：配对（开发期自动指纹）→ 列目录 → 逐级浏览 → 点文件下载到收件箱
+/// MyLanFiles 浏览页（P1 垂直切片 3）：
+/// - 「本机服务」：持久化自签 TLS 身份 + LAN 地址 + 二维码配对（§4.1 pair）
+/// - 「连接远程」：粘贴二维码内容（JSON）→ 指纹 pin 握手 → 配对 → 浏览
+/// - 「传输」：多选 → 自适应打包流（§4.2 中位 <2MiB）/ 逐文件 Range 续传，
+///   队列串行执行 + 进度 UI；skip 断点续传（内容寻址，重传只补缺）
 ///
-/// 有意不依赖上游 provider/i18n（fork 卫生）；真实二维码配对与 TLS 在后续切片接入。
+/// 有意不依赖上游 provider/i18n（fork 卫生，ADR-0002）；QR 用上游同一
+/// 组件 pretty_qr_code 自建弹窗，不引入对上游 UI 外壳的依赖。
 class MyLanFilesBrowsePage extends StatefulWidget {
   const MyLanFilesBrowsePage({super.key});
 
@@ -21,23 +26,32 @@ class MyLanFilesBrowsePage extends StatefulWidget {
 }
 
 class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
+  // 本机服务
   MlfServer? _server;
-  String? _serverFingerprint;
+  TlsIdentity? _identity;
+  String? _lanIp;
   String? _rootPath;
 
+  // 远程连接
   final _addressController = TextEditingController();
-  final _client = http.Client();
-  String? _clientFingerprint;
+  MlfClient? _client;
+  Uri? _remoteBase;
+  final _clientFingerprint = devFingerprint('client');
 
+  // 浏览与多选
   List<FsEntry> _entries = [];
   String _currentPath = '/';
+  final Set<String> _selected = {};
   bool _busy = false;
   String? _error;
+
+  final TransferQueue _queue = TransferQueue();
 
   @override
   void dispose() {
     unawaited(_server?.stop());
-    _client.close();
+    _client?.close();
+    _queue.dispose();
     _addressController.dispose();
     super.dispose();
   }
@@ -51,24 +65,38 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     return inbox;
   }
 
+  // ---- 本机服务（TLS + QR 配对）----
+
   Future<void> _toggleServer() async {
-    setState(() => _busy = true);
+    setState(() {
+      _busy = true;
+      _error = null;
+    });
     try {
       if (_server != null) {
         await _server!.stop();
         _server = null;
-        _serverFingerprint = null;
-      } else {
-        final inbox = await _inboxDir();
-        _rootPath = inbox.parent.path; // 共享根演示用收件箱所在目录
-        _server = MlfServer(
-          vfs: LocalVfs(root: _rootPath!),
-          serverFingerprint: devFingerprint('local-server'),
-        );
-        await _server!.bind(InternetAddress.loopbackIPv4, 0);
-        _serverFingerprint = devFingerprint('local-server');
-        _addressController.text = 'http://127.0.0.1:${_server!.port}';
+        setState(() {});
+        return;
       }
+      // 身份持久化在应用私有目录（共享根之外，私钥不可经共享根泄露）。
+      final support = await getApplicationSupportDirectory();
+      _identity = await loadOrCreateIdentity(
+        Directory('${support.path}/identity'),
+      );
+      final inbox = await _inboxDir();
+      _rootPath = inbox.parent.path;
+      final server = MlfServer(
+        vfs: LocalVfs(root: _rootPath!),
+        serverFingerprint: _identity!.fingerprint,
+      );
+      await server.bind(
+        InternetAddress.anyIPv4,
+        0,
+        securityContext: _identity!.context,
+      );
+      _server = server;
+      _lanIp = await lanIPv4();
       setState(() {});
     } on Object catch (e) {
       setState(() => _error = '服务启动失败: $e');
@@ -77,90 +105,287 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
   }
 
-  Map<String, String> get _authHeaders => _clientFingerprint == null ? {} : {'x-mlf-fingerprint': _clientFingerprint!};
+  MlfPairingInfo pairingInfoOf(String ip) => MlfPairingInfo(
+    ip: ip,
+    port: _server?.port ?? 0,
+    fingerprint: _identity?.fingerprint ?? '',
+  );
+
+  Future<void> _showPairingQr() async {
+    final info = pairingInfoOf(_lanIp ?? '127.0.0.1');
+    final json = const JsonEncoder.withIndent(' ').convert(info.toJson());
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('扫码 / 粘贴配对'),
+        content: SizedBox(
+          width: 280,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              SizedBox(
+                width: 220,
+                height: 220,
+                child: PrettyQrView.data(
+                  errorCorrectLevel: QrErrorCorrectLevel.Q,
+                  data: jsonEncode(info.toJson()),
+                  decoration: PrettyQrDecoration(
+                    shape: PrettyQrSmoothSymbol(
+                      roundFactor: 0,
+                      color: Theme.of(context).colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+              ),
+              const SizedBox(height: 12),
+              SelectableText(
+                'https://${info.ip}:${info.port}',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 4),
+              SelectableText(
+                '指纹 ${info.fingerprint.substring(0, 16)}…',
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+              const SizedBox(height: 8),
+              SelectableText(
+                json,
+                style: Theme.of(context).textTheme.bodySmall,
+              ),
+            ],
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () async {
+              await Clipboard.setData(
+                ClipboardData(text: jsonEncode(info.toJson())),
+              );
+              if (context.mounted) {
+                ScaffoldMessenger.of(
+                  context,
+                ).showSnackBar(const SnackBar(content: Text('配对信息已复制')));
+              }
+            },
+            child: const Text('复制配对信息'),
+          ),
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---- 远程连接（指纹 pin 握手）----
 
   Future<void> _connect() async {
     final raw = _addressController.text.trim();
     if (raw.isEmpty) {
       return;
     }
+    final MlfPairingInfo info;
+    try {
+      info = MlfPairingInfo.parse(raw);
+    } on FormatException catch (e) {
+      setState(() => _error = '配对信息格式错误: $e');
+      return;
+    }
+    if (!info.hasFingerprint) {
+      setState(() => _error = '缺少证书指纹——请粘贴完整二维码内容（JSON）');
+      return;
+    }
     setState(() {
       _busy = true;
       _error = null;
     });
+    _client?.close();
+    _client = null;
     try {
-      final base = Uri.parse(raw.endsWith('/') ? raw : '$raw/');
-      _clientFingerprint ??= devFingerprint('client');
-
-      final pairRes = await _client.post(
-        base.resolve('api/v1/pair'),
-        body: '{"fingerprint":"$_clientFingerprint"}',
-        headers: {'content-type': 'application/json'},
-      );
-      if (pairRes.statusCode != 200) {
-        throw '配对失败: ${pairRes.statusCode} ${pairRes.body}';
-      }
-      await _listDir(base, '/');
+      final client = MlfClient(pinnedFingerprint: info.fingerprint);
+      // 握手即校验：证书指纹 ≠ 二维码指纹时 TLS 握手直接失败（§7 pin）。
+      await client.pair(info.baseUri, _clientFingerprint);
+      _client = client;
+      _remoteBase = info.baseUri;
+      await _listDir('/');
       setState(() {});
     } on Object catch (e) {
-      setState(() => _error = '$e');
+      _remoteBase = null;
+      setState(() => _error = '连接失败（指纹不匹配或不可达）: $e');
     } finally {
       setState(() => _busy = false);
     }
   }
 
-  Future<void> _listDir(Uri base, String path) async {
-    final res = await _client.get(
-      base.resolve('api/v1/fs/list').replace(queryParameters: {'path': path}),
-      headers: _authHeaders,
-    );
-    if (res.statusCode != 200) {
-      throw '列目录失败: ${res.statusCode} ${res.body}';
+  /// 同机演示：连接本机正在运行的服务（loopback 免防火墙）。
+  Future<void> _connectLocalDemo() async {
+    if (_server == null || _identity == null) {
+      return;
     }
-    final body = jsonDecodeMap(res.body);
-    final entries = (body['entries'] as List).map((m) => FsEntry.fromMap(m as Map<dynamic, dynamic>)).toList();
+    _addressController.text = jsonEncode(pairingInfoOf('127.0.0.1').toJson());
+    await _connect();
+  }
+
+  Future<void> _listDir(String path) async {
+    final entries = await _client!.list(_remoteBase!, path);
     setState(() {
       _entries = entries;
-      _currentPath = body['path'] as String? ?? path;
+      _currentPath = path;
+      _selected.clear();
     });
   }
 
-  Future<void> _download(FsEntry entry) async {
-    if (_addressController.text.isEmpty) {
+  Future<void> _openEntry(FsEntry entry) async {
+    if (entry.isDir) {
+      setState(() => _busy = true);
+      try {
+        await _listDir(entry.path);
+      } on Object catch (e) {
+        setState(() => _error = '$e');
+      } finally {
+        setState(() => _busy = false);
+      }
       return;
     }
-    final base = Uri.parse(_addressController.text);
-    setState(() => _busy = true);
-    try {
-      final res = await _client.get(
-        base.resolve('api/v1/fs/read').replace(queryParameters: {'path': entry.path}),
-        headers: _authHeaders,
-      );
-      if (res.statusCode != 200) {
-        throw '下载失败: ${res.statusCode}';
-      }
-      final inbox = await _inboxDir();
-      final safeName = sanitizeFilename(entry.name);
-      final target = File('${inbox.path}/$safeName');
-      if (target.existsSync()) {
-        target.deleteSync();
-      }
-      await target.writeAsBytes(res.bodyBytes, flush: true);
-      if (mounted) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text('已下载到 ${target.path}')),
-        );
-      }
-    } on Object catch (e) {
-      setState(() => _error = '$e');
-    } finally {
-      setState(() => _busy = false);
-    }
+    _enqueueDownload(entry);
   }
+
+  // ---- 传输（队列 + 打包流/Range 续传）----
+
+  void _enqueueDownload(FsEntry entry) {
+    _queue.enqueue(
+      TransferTask(
+        label: entry.name,
+        kind: TransferKind.singleFile,
+        totalBytes: entry.size,
+        runner: (task) => _runDownload(task, entry),
+      ),
+    );
+  }
+
+  /// 逐文件下载，Range 断点续传：`.part` 落盘，失败保留，重试从
+  /// offset=part 长度继续（§4.1 fs/read offset）。成功后原子改名。
+  Future<void> _runDownload(TransferTask task, FsEntry entry) async {
+    final inbox = await _inboxDir();
+    final safeName = sanitizeFilename(entry.name);
+    final part = File('${inbox.path}/$safeName.part');
+    final offset = part.existsSync() ? await part.length() : 0;
+    if (offset > 0) {
+      task.setDetail('断点续传：从 ${formatBytes(offset)} 处继续');
+      task.receivedBytes = offset;
+    }
+    final res = await _client!.read(_remoteBase!, entry.path, offset: offset);
+    final sink = part.openWrite(mode: FileMode.append);
+    try {
+      await sink.addStream(countBytes(res.stream, task.addBytes));
+      await sink.flush();
+      await sink.close();
+    } on Object {
+      await sink.close();
+      rethrow; // .part 保留，重试续传
+    }
+    final target = File('${inbox.path}/$safeName');
+    if (target.existsSync()) {
+      await target.delete();
+    }
+    await part.rename(target.path);
+  }
+
+  /// 多选 → 打包流（§4.2）。skip = 收件箱中同名同尺寸文件的 SHA-256
+  /// （内容寻址断点：服务端整帧跳过，重传只补缺）。
+  Future<void> _enqueuePack(List<FsEntry> files) async {
+    final inbox = await _inboxDir();
+    final skip = <String>{};
+    var skippedBytes = 0;
+    for (final f in files) {
+      final local = File('${inbox.path}/${sanitizeFilename(f.name)}');
+      // 同名且同尺寸才值得算哈希（内容不同必尺寸不同，省去大文件哈希）。
+      if (local.existsSync() && await local.length() == f.size) {
+        skip.add(await sha256FileHex(local));
+        skippedBytes += f.size;
+      }
+    }
+    final totalBytes = files.fold(0, (a, f) => a + f.size) - skippedBytes;
+    final task = TransferTask(
+      label: '打包 ${files.length} 个文件',
+      kind: TransferKind.pack,
+      totalBytes: totalBytes,
+      runner: (task) => _runPack(task, files),
+    )..setDetail('新增 ${formatBytes(totalBytes)} · 已有跳过 ${formatBytes(skippedBytes)}');
+    _queue.enqueue(task);
+  }
+
+  /// 消费打包流：逐帧落盘 + SHA-256 校验（帧自带指纹，落盘后复核）。
+  Future<void> _runPack(TransferTask task, List<FsEntry> files) async {
+    final inbox = await _inboxDir();
+    final skip = <String>{};
+    for (final f in files) {
+      final local = File('${inbox.path}/${sanitizeFilename(f.name)}');
+      if (local.existsSync() && await local.length() == f.size) {
+        skip.add(await sha256FileHex(local));
+      }
+    }
+    final reader = await _client!.pack(
+      _remoteBase!,
+      files.map((f) => f.path).toList(),
+      skip: skip,
+    );
+    var received = 0;
+    while (true) {
+      final frame = await reader.next();
+      if (frame == null) {
+        break;
+      }
+      task.setDetail('正在 ${frame.name}');
+      final target = File('${inbox.path}/${sanitizeFilename(frame.name)}');
+      final sink = target.openWrite();
+      var ok = true;
+      try {
+        await sink.addStream(countBytes(frame.data, task.addBytes));
+        await sink.flush();
+      } on Object {
+        ok = false;
+        rethrow;
+      } finally {
+        await sink.close();
+        if (!ok) {
+          await target.delete(); // 半截文件不留在收件箱
+        }
+      }
+      final sha = await sha256FileHex(target);
+      if (sha != frame.shaHex) {
+        await target.delete();
+        throw MlfClientException('${frame.name} 校验失败（传输损坏）');
+      }
+      received++;
+    }
+    await reader.cancel();
+    task.setDetail('新增 $received 个 · 跳过 ${files.length - received} 个已存在');
+  }
+
+  /// 多选下载入口：按 §4.2 自适应规则选打包流或逐文件。
+  Future<void> _downloadSelected() async {
+    final files = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
+    if (files.isEmpty) {
+      return;
+    }
+    final mode = pickTransferMode(files.map((f) => f.size));
+    if (mode == TransferMode.pack) {
+      await _enqueuePack(files);
+    } else {
+      for (final f in files) {
+        _enqueueDownload(f);
+      }
+    }
+    setState(() => _selected.clear());
+  }
+
+  // ---- UI ----
 
   @override
   Widget build(BuildContext context) {
-    final remoteBase = _addressController.text.trim().isEmpty ? null : Uri.parse(_addressController.text.trim());
+    final selectedFiles = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
     return Scaffold(
       appBar: AppBar(title: const Text('MyLanFiles 浏览')),
       body: _busy
@@ -168,86 +393,288 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
           : ListView(
               padding: const EdgeInsets.all(12),
               children: [
-                Card(
-                  child: ListTile(
-                    leading: Icon(
-                      _server == null ? Icons.play_arrow : Icons.stop,
-                    ),
-                    title: Text(_server == null ? '启动本机服务' : '停止本机服务'),
-                    subtitle: Text(
-                      _server == null ? '共享根：本机收件箱目录' : '$_rootPath\n端口 ${_server!.port} · 指纹 ${_serverFingerprint?.substring(0, 12)}…',
-                    ),
-                    isThreeLine: _server != null,
-                    onTap: () async => await _toggleServer(),
-                  ),
-                ),
+                _buildServerCard(),
                 const SizedBox(height: 8),
-                Row(
-                  children: [
-                    Expanded(
-                      child: TextField(
-                        controller: _addressController,
-                        decoration: const InputDecoration(
-                          labelText: '远程地址',
-                          hintText: 'http://127.0.0.1:端口',
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    FilledButton(
-                      onPressed: _connect,
-                      child: const Text('连接'),
-                    ),
-                  ],
-                ),
+                _buildConnectRow(),
                 if (_error != null)
                   Padding(
                     padding: const EdgeInsets.only(top: 8),
                     child: Text(
                       _error!,
-                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ),
                 const Divider(height: 24),
-                if (_entries.isNotEmpty) ...[
-                  if (_currentPath != '/')
-                    ListTile(
-                      leading: const Icon(Icons.arrow_upward),
-                      title: const Text('..'),
-                      onTap: () async {
-                        final parent = _currentPath.endsWith('/') ? _currentPath.substring(0, _currentPath.length - 1) : _currentPath;
-                        final idx = parent.lastIndexOf('/');
-                        await _listDir(remoteBase!, idx <= 0 ? '/' : parent.substring(0, idx));
-                      },
-                    ),
-                  ..._entries.map(
-                    (e) => ListTile(
-                      leading: Icon(e.isDir ? Icons.folder : Icons.insert_drive_file),
-                      title: Text(e.name),
-                      subtitle: Text(e.isDir ? '目录' : formatBytes(e.size)),
-                      onTap: () async {
-                        if (e.isDir) {
-                          await _listDir(remoteBase!, e.path);
-                        } else {
-                          await _download(e);
-                        }
-                      },
-                    ),
-                  ),
+                if (_remoteBase != null) ...[
+                  _buildSelectionBar(selectedFiles),
+                  ..._buildEntryList(),
                 ] else
                   const Padding(
                     padding: EdgeInsets.all(16),
                     child: Center(child: Text('连接远程后在此浏览文件')),
                   ),
+                const Divider(height: 24),
+                _buildQueuePanel(),
               ],
             ),
     );
   }
+
+  Widget _buildServerCard() {
+    final running = _server != null;
+    return Card(
+      child: ListTile(
+        leading: Icon(running ? Icons.stop : Icons.play_arrow),
+        title: Text(running ? '停止本机服务' : '启动本机服务（https）'),
+        subtitle: Text(
+          running
+              ? '$_rootPath\nhttps://${_lanIp ?? '127.0.0.1'}:${_server!.port} · '
+                    '指纹 ${_identity!.fingerprint.substring(0, 12)}…'
+              : '共享根：本机收件箱所在目录；自签证书 + 二维码配对',
+        ),
+        isThreeLine: running,
+        onTap: () => unawaited(_toggleServer()),
+        trailing: running
+            ? IconButton(
+                icon: const Icon(Icons.qr_code_2),
+                tooltip: '配对二维码',
+                onPressed: _showPairingQr,
+              )
+            : null,
+      ),
+    );
+  }
+
+  Widget _buildConnectRow() {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Expanded(
+              child: TextField(
+                controller: _addressController,
+                decoration: const InputDecoration(
+                  labelText: '配对信息（粘贴二维码内容）',
+                  hintText: '{"v":1,"proto":"mlf",...}',
+                ),
+              ),
+            ),
+            const SizedBox(width: 8),
+            FilledButton(onPressed: _connect, child: const Text('连接')),
+          ],
+        ),
+        if (_server != null)
+          Align(
+            alignment: Alignment.centerRight,
+            child: TextButton.icon(
+              onPressed: _connectLocalDemo,
+              icon: const Icon(Icons.loop),
+              label: const Text('本机演示（连自己）'),
+            ),
+          ),
+      ],
+    );
+  }
+
+  Widget _buildSelectionBar(List<FsEntry> selectedFiles) {
+    final dirCount = _entries.where((e) => e.isDir).length;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Row(
+          children: [
+            TextButton(
+              onPressed: () => setState(() {
+                if (_selected.length < _entries.length - dirCount) {
+                  _selected
+                    ..clear()
+                    ..addAll(_entries.where((e) => !e.isDir).map((e) => e.path));
+                } else {
+                  _selected.clear();
+                }
+              }),
+              child: Text(
+                _selected.isEmpty || _selected.length < _entries.length - dirCount ? '全选' : '取消全选',
+              ),
+            ),
+            const Spacer(),
+            if (selectedFiles.isNotEmpty)
+              Text(
+                '已选 ${selectedFiles.length} 个 · '
+                '${formatBytes(selectedFiles.fold(0, (a, f) => a + f.size))} · '
+                '${pickTransferMode(selectedFiles.map((f) => f.size)) == TransferMode.pack ? '打包流' : '逐文件'}',
+              ),
+          ],
+        ),
+        if (selectedFiles.isNotEmpty)
+          FilledButton.icon(
+            onPressed: _downloadSelected,
+            icon: const Icon(Icons.download),
+            label: const Text('下载所选'),
+          ),
+      ],
+    );
+  }
+
+  List<Widget> _buildEntryList() {
+    final widgets = <Widget>[];
+    if (_currentPath != '/') {
+      widgets.add(
+        ListTile(
+          leading: const Icon(Icons.arrow_upward),
+          title: const Text('..'),
+          onTap: () {
+            final parent = _currentPath.endsWith('/') ? _currentPath.substring(0, _currentPath.length - 1) : _currentPath;
+            final idx = parent.lastIndexOf('/');
+            unawaited(_openDir(idx <= 0 ? '/' : parent.substring(0, idx)));
+          },
+        ),
+      );
+    }
+    for (final e in _entries) {
+      widgets.add(
+        ListTile(
+          leading: e.isDir
+              ? const Icon(Icons.folder)
+              : Checkbox(
+                  value: _selected.contains(e.path),
+                  onChanged: (_) => _toggleSelect(e),
+                ),
+          title: Text(e.name),
+          subtitle: Text(e.isDir ? '目录' : formatBytes(e.size)),
+          onTap: () => _openEntry(e),
+          trailing: e.isDir
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.download),
+                  tooltip: '下载',
+                  onPressed: () => _enqueueDownload(e),
+                ),
+        ),
+      );
+    }
+    return widgets;
+  }
+
+  Future<void> _openDir(String path) async {
+    setState(() => _busy = true);
+    try {
+      await _listDir(path);
+    } on Object catch (e) {
+      setState(() => _error = '$e');
+    } finally {
+      setState(() => _busy = false);
+    }
+  }
+
+  void _toggleSelect(FsEntry e) {
+    setState(() {
+      if (!_selected.add(e.path)) {
+        _selected.remove(e.path);
+      }
+    });
+  }
+
+  Widget _buildQueuePanel() {
+    return ListenableBuilder(
+      listenable: _queue,
+      builder: (context, _) {
+        final tasks = _queue.tasks;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: [
+            Row(
+              children: [
+                const Icon(Icons.swap_vert, size: 18),
+                const SizedBox(width: 4),
+                Text('传输队列（${_queue.activeCount} 活跃 / ${tasks.length} 总计）'),
+                const Spacer(),
+                if (tasks.any(
+                  (t) => t.state == TransferState.done || t.state == TransferState.failed,
+                ))
+                  TextButton(
+                    onPressed: _queue.clearFinished,
+                    child: const Text('清除已完成'),
+                  ),
+              ],
+            ),
+            if (tasks.isEmpty)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 8),
+                child: Text('暂无传输任务', style: TextStyle(color: Colors.grey)),
+              ),
+            ...tasks.map(_buildTaskTile),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildTaskTile(TransferTask task) {
+    return ListenableBuilder(
+      listenable: task,
+      builder: (context, _) {
+        final failed = task.state == TransferState.failed;
+        return Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Row(
+              children: [
+                Icon(
+                  switch (task.state) {
+                    TransferState.queued => Icons.schedule,
+                    TransferState.running => Icons.sync,
+                    TransferState.done => Icons.check_circle,
+                    TransferState.failed => Icons.error,
+                  },
+                  size: 18,
+                  color: switch (task.state) {
+                    TransferState.done => Colors.green,
+                    TransferState.failed => Theme.of(context).colorScheme.error,
+                    _ => Colors.grey,
+                  },
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    task.label,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+                Text(
+                  '${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+                if (failed)
+                  IconButton(
+                    icon: const Icon(Icons.refresh, size: 18),
+                    tooltip: '重试（断点续传）',
+                    onPressed: () => _queue.retry(task),
+                  ),
+              ],
+            ),
+            if (task.detail.isNotEmpty)
+              Padding(
+                padding: const EdgeInsets.only(left: 24),
+                child: Text(
+                  failed ? '${task.detail} ${task.error ?? ''}' : task.detail,
+                  style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: failed ? Theme.of(context).colorScheme.error : null,
+                  ),
+                ),
+              ),
+            LinearProgressIndicator(
+              value: task.state == TransferState.done ? 1 : task.progress,
+            ),
+            const SizedBox(height: 8),
+          ],
+        );
+      },
+    );
+  }
 }
-
-// ---- 小工具（避免为此引依赖）----
-
-Map<dynamic, dynamic> jsonDecodeMap(String source) => const JsonDecoder().convert(source) as Map<dynamic, dynamic>;
 
 String formatBytes(int bytes) {
   if (bytes < 1024) {
@@ -257,7 +684,7 @@ String formatBytes(int bytes) {
     return '${(bytes / 1024).toStringAsFixed(1)} KB';
   }
   if (bytes < 1024 * 1024 * 1024) {
-    return '${(bytes / 1024 / 1024).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024).toStringAsFixed(1)} MB';
   }
   return '${(bytes / 1024 / 1024 / 1024).toStringAsFixed(2)} GB';
 }
