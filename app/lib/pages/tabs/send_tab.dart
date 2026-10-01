@@ -4,6 +4,7 @@ import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/send_mode.dart';
 import 'package:localsend_app/pages/device_details_page.dart';
+import 'package:localsend_app/pages/mylanfiles_browse_page.dart';
 import 'package:localsend_app/pages/mylanfiles_probe_page.dart';
 import 'package:localsend_app/pages/selected_files_page.dart';
 import 'package:localsend_app/pages/tabs/send_tab_vm.dart';
@@ -238,6 +239,14 @@ class SendTab extends StatelessWidget {
                   await context.push(() => const MyLanFilesProbePage());
                 },
                 child: const Text('MyLanFiles Probe (spike1)'),
+              ),
+            ),
+            Center(
+              child: TextButton(
+                onPressed: () async {
+                  await context.push(() => const MyLanFilesBrowsePage());
+                },
+                child: const Text('MyLanFiles 浏览'),
               ),
             ),
             Center(

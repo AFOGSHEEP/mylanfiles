@@ -27,11 +27,19 @@ jobs:
         run: dart pub get
 
       - name: Format
-        run: dart format --set-exit-if-changed packages/mylanfiles_core
+        run: |
+          dart format --set-exit-if-changed packages/mylanfiles_core
+          dart format --set-exit-if-changed packages/mylanfiles_server
 
       - name: Analyze
-        run: dart analyze packages/mylanfiles_core
+        run: |
+          dart analyze packages/mylanfiles_core
+          dart analyze packages/mylanfiles_server
 
-      - name: Test
+      - name: Test (core)
         working-directory: packages/mylanfiles_core
+        run: dart test
+
+      - name: Test (server)
+        working-directory: packages/mylanfiles_server
         run: dart test
