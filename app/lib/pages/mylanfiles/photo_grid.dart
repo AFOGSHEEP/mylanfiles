@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
@@ -81,12 +82,28 @@ class _MlfPhotoGridState extends State<MlfPhotoGrid> {
         _entries = (res['entries'] as List).map((e) => (e as Map).cast<String, dynamic>()).toList();
         _loading = false;
       });
+      unawaited(_prefetchAll());
     } on Object catch (e) {
       setState(() {
         _error = '桶加载失败: $e';
         _loading = false;
       });
     }
+  }
+
+  /// 首屏之后后台预取整页缩略图(2 并发),滚动到哪都即时可见。
+  Future<void> _prefetchAll() async {
+    final tokens = _entries.map((e) => e['thumb'] as String?).whereType<String>().toList();
+    debugPrint('[MLF] thumb prefetch start: ' + tokens.length.toString());
+    final it = tokens.iterator;
+    Future<void> worker() async {
+      while (it.moveNext()) {
+        await _thumb(it.current);
+      }
+    }
+
+    await Future.wait([worker(), worker()]);
+    debugPrint('[MLF] thumb prefetch done');
   }
 
   Future<Uint8List?> _thumb(String token) {
@@ -101,7 +118,7 @@ class _MlfPhotoGridState extends State<MlfPhotoGrid> {
           _thumbCache.clear(); // 粗粒度上限,防大相册内存
         }
         _thumbCache[token] = bytes;
-        debugPrint('[MLF] thumb fetched, cache=' + _thumbCache.length.toString());
+        debugPrint('[MLF] ' + DateTime.now().toIso8601String().substring(11, 19) + ' thumb fetched, cache=' + _thumbCache.length.toString());
         return bytes;
       } on Object {
         return null; // HEIC 等不支持 → 占位

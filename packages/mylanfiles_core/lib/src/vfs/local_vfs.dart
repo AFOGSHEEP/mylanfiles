@@ -100,6 +100,10 @@ class LocalVfs implements Vfs {
         FileSystemEntityType.directory) {
       throw VfsIsDirException(path);
     }
+    // 契约：offset>0 是续传路径，要求目标已存在（对抗轮3：此前隐式零扩展建文件）。
+    if (offset > 0 && !FileSystemEntity.isFileSync(p)) {
+      throw VfsNotFoundException(path);
+    }
     // Resume semantics: append mode writes at current EOF, so
     // truncate(offset) keeps [0, offset) and puts the EOF there.
     final raf = await File(p).open(mode: FileMode.append);

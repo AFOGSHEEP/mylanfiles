@@ -488,6 +488,9 @@ class MlfServer {
     if (token == null || token.isEmpty) {
       return Response(400, body: jsonEncode({'error': 'token required'}));
     }
+    if (!const {160, 320, 640}.contains(size)) {
+      return Response(400, body: jsonEncode({'error': 'bad size'}));
+    }
     try {
       final rendered = await _thumb.render(token, size);
       if (rendered == null) {

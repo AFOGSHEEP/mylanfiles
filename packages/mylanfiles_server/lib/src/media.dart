@@ -276,7 +276,10 @@ class ThumbService {
     if (_tokenToPath.length >= maxTokens) {
       _tokenToPath.remove(_tokenToPath.keys.first); // LRU 粗粒度驱逐
     }
-    final token = List.generate(16, (_) => _rng.nextInt(256)).join();
+    final token = List.generate(
+      16,
+      (_) => _rng.nextInt(256).toRadixString(16).padLeft(2, '0'),
+    ).join();
     _tokenToPath[token] = path;
     return token;
   }
