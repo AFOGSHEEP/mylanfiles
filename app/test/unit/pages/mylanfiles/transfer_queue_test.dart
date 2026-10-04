@@ -108,6 +108,58 @@ void main() {
       expect(ran, 2);
     });
 
+    test('cancel: queued task never runs; running task cancels at checkpoint',
+        () async {
+      final queue = TransferQueue();
+      addTearDown(queue.dispose);
+      final started = Completer<void>();
+      var runs = 0;
+
+      final running = TransferTask(
+        label: 'long',
+        kind: TransferKind.pack,
+        totalBytes: 100,
+        runner: (task) async {
+          runs++;
+          started.complete();
+          // 卡在"传输中"直到被取消（countBytes 回调处抛 TaskCanceledException 的模拟）。
+          while (!task.cancelRequested) {
+            await Future<void>.delayed(const Duration(milliseconds: 5));
+          }
+          task.addBytes(40); // 半途的进度保留
+          throw const TaskCanceledException();
+        },
+      );
+      final queued = TransferTask(
+        label: 'next',
+        kind: TransferKind.singleFile,
+        totalBytes: 1,
+        runner: (_) async {
+          runs++;
+        },
+      );
+
+      queue
+        ..enqueue(running)
+        ..enqueue(queued);
+      await started.future;
+      queued.cancel(); // 还在排队：直接取消
+      expect(queued.state, TransferState.queued); // 取消在 drain 前不生效
+      running.cancel(); // 运行中：runner 在检查点退出
+
+      await Future<void>.delayed(const Duration(milliseconds: 50));
+      expect(running.state, TransferState.canceled);
+      expect(queued.state, TransferState.canceled);
+      expect(queued.receivedBytes, 0);
+      expect(runs, 1, reason: 'queued task must never start after cancel');
+
+      // 取消后可重试（断点续传语义）。
+      queue.retry(queued);
+      await Future<void>.delayed(const Duration(milliseconds: 30));
+      expect(queued.state, TransferState.done);
+      expect(runs, 2);
+    });
+
     test('clearFinished keeps queued/running tasks', () async {
       final queue = TransferQueue();
       addTearDown(queue.dispose);

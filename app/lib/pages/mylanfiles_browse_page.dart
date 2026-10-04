@@ -4,10 +4,12 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:localsend_app/pages/mylanfiles/qr_scan_page.dart';
 import 'package:localsend_app/pages/mylanfiles/transfer_queue.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:mylanfiles_server/mylanfiles_server.dart';
 import 'package:path_provider/path_provider.dart';
+import 'package:permission_handler/permission_handler.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 
 /// MyLanFiles 浏览页（P1 垂直切片 3）：
@@ -45,7 +47,51 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   bool _busy = false;
   String? _error;
 
+  // Android：所有文件访问（MANAGE）授予状态；null = 非 Android 或未查询
+  bool? _manageGranted;
+
   final TransferQueue _queue = TransferQueue();
+
+  @override
+  void initState() {
+    super.initState();
+    if (Platform.isAndroid) {
+      _refreshManageStatus();
+    }
+    // 开发/联调捷径：MLF_AUTO_SERVER=1 启动即自动开服务并打印配对 JSON
+    // （无人值守 E2E 用；不影响正常启动路径）。
+    if (Platform.environment['MLF_AUTO_SERVER'] == '1') {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_autoStartForE2E());
+      });
+    }
+  }
+
+  Future<void> _autoStartForE2E() async {
+    if (_server != null) {
+      return;
+    }
+    await _toggleServer();
+    if (_server == null || _identity == null) {
+      return;
+    }
+    final info = pairingInfoOf(_lanIp ?? '127.0.0.1');
+    // 一行机器可读输出，脚本解析用。
+    debugPrint('[MLF-PAIRING] ${jsonEncode(info.toJson())}');
+  }
+
+  Future<void> _refreshManageStatus() async {
+    final status = await Permission.manageExternalStorage.status;
+    if (mounted) {
+      setState(() => _manageGranted = status.isGranted);
+    }
+  }
+
+  /// Android 上请求「所有文件访问」（跳系统设置页），返回后重查状态。
+  Future<void> _requestManage() async {
+    await Permission.manageExternalStorage.request();
+    await _refreshManageStatus();
+  }
 
   @override
   void dispose() {
@@ -56,13 +102,42 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     super.dispose();
   }
 
+  /// 收件箱（下载落地目录）。
+  /// - Android 且已授 MANAGE：公开 Download/MyLanFiles-Inbox（用户可见可取）
+  /// - 其余：下载目录（Windows）/应用外部目录（Android 无 MANAGE 时的降级）
   Future<Directory> _inboxDir() async {
+    if (Platform.isAndroid && _manageGranted == true) {
+      final inbox = Directory('/storage/emulated/0/Download/MyLanFiles-Inbox');
+      if (!inbox.existsSync()) {
+        inbox.createSync(recursive: true);
+      }
+      return inbox;
+    }
+    if (Platform.isAndroid) {
+      final base = await getExternalStorageDirectory();
+      final inbox = Directory('${base?.path ?? '/data/local/tmp'}/MyLanFiles-Inbox');
+      if (!inbox.existsSync()) {
+        inbox.createSync(recursive: true);
+      }
+      return inbox;
+    }
     final base = await getDownloadsDirectory() ?? await getApplicationDocumentsDirectory();
     final inbox = Directory('${base.path}/MyLanFiles-Inbox');
     if (!inbox.existsSync()) {
       inbox.createSync(recursive: true);
     }
     return inbox;
+  }
+
+  /// 共享根：本端对外暴露的目录树起点。
+  /// - Android 且已授 MANAGE：整个用户存储（产品的核心场景：手机相册/文件被浏览）
+  /// - 其余：收件箱所在目录（演示配置，正式版改为用户可选）
+  Future<String> _sharedRoot() async {
+    if (Platform.isAndroid && _manageGranted == true) {
+      return '/storage/emulated/0';
+    }
+    final inbox = await _inboxDir();
+    return inbox.parent.path;
   }
 
   // ---- 本机服务（TLS + QR 配对）----
@@ -84,8 +159,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       _identity = await loadOrCreateIdentity(
         Directory('${support.path}/identity'),
       );
-      final inbox = await _inboxDir();
-      _rootPath = inbox.parent.path;
+      _rootPath = await _sharedRoot();
       final server = MlfServer(
         vfs: LocalVfs(root: _rootPath!),
         serverFingerprint: _identity!.fingerprint,
@@ -253,39 +327,88 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
 
   // ---- 传输（队列 + 打包流/Range 续传）----
 
+  /// 服务端重启后配对表丢失 → 403；自动重新 pair 一次再重试当前操作。
+  Future<void> _withReauth(Future<void> Function() body) async {
+    try {
+      await body();
+    } on MlfClientException catch (e) {
+      if (!e.message.contains('403') || _client == null || _remoteBase == null) {
+        rethrow;
+      }
+      await _client!.pair(_remoteBase!, _clientFingerprint);
+      await body();
+    }
+  }
+
+  void _throwIfCanceled(TransferTask task) {
+    if (task.cancelRequested) {
+      throw const TaskCanceledException();
+    }
+  }
+
   void _enqueueDownload(FsEntry entry) {
     _queue.enqueue(
       TransferTask(
         label: entry.name,
         kind: TransferKind.singleFile,
         totalBytes: entry.size,
-        runner: (task) => _runDownload(task, entry),
+        runner: (task) => _withReauth(() => _runDownload(task, entry)),
       ),
     );
   }
 
   /// 逐文件下载，Range 断点续传：`.part` 落盘，失败保留，重试从
   /// offset=part 长度继续（§4.1 fs/read offset）。成功后原子改名。
+  /// 远端文件比本地 .part 小（远端已变化）时丢弃 .part 从头重传。
   Future<void> _runDownload(TransferTask task, FsEntry entry) async {
     final inbox = await _inboxDir();
     final safeName = sanitizeFilename(entry.name);
     final part = File('${inbox.path}/$safeName.part');
-    final offset = part.existsSync() ? await part.length() : 0;
+    var offset = part.existsSync() ? await part.length() : 0;
+    if (offset > entry.size) {
+      await part.delete();
+      offset = 0;
+    }
+    if (offset == entry.size && offset > 0) {
+      // .part 已完整：直接落名（上次在改名前被打断的情形）。
+      await _finalizePart(part, File('${inbox.path}/$safeName'));
+      task.receivedBytes = entry.size;
+      return;
+    }
     if (offset > 0) {
       task.setDetail('断点续传：从 ${formatBytes(offset)} 处继续');
       task.receivedBytes = offset;
     }
-    final res = await _client!.read(_remoteBase!, entry.path, offset: offset);
-    final sink = part.openWrite(mode: FileMode.append);
     try {
-      await sink.addStream(countBytes(res.stream, task.addBytes));
-      await sink.flush();
-      await sink.close();
-    } on Object {
-      await sink.close();
-      rethrow; // .part 保留，重试续传
+      final res = await _client!.read(_remoteBase!, entry.path, offset: offset);
+      final sink = part.openWrite(mode: FileMode.append);
+      try {
+        await sink.addStream(
+          countBytes(res.stream, (d) {
+            _throwIfCanceled(task);
+            task.addBytes(d);
+          }),
+        );
+        await sink.flush();
+        await sink.close();
+      } on Object {
+        await sink.close();
+        rethrow; // .part 保留，重试续传
+      }
+    } on MlfClientException catch (e) {
+      // 远端比本地 .part 短（"offset past EOF"）：文件已变化，重置重传一次。
+      if (e.message.contains('400') && offset > 0) {
+        await part.delete();
+        task.receivedBytes = 0;
+        task.setDetail('远端文件已变化，重新下载');
+        return _runDownload(task, entry);
+      }
+      rethrow;
     }
-    final target = File('${inbox.path}/$safeName');
+    await _finalizePart(part, File('${inbox.path}/$safeName'));
+  }
+
+  Future<void> _finalizePart(File part, File target) async {
     if (target.existsSync()) {
       await target.delete();
     }
@@ -311,56 +434,59 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       label: '打包 ${files.length} 个文件',
       kind: TransferKind.pack,
       totalBytes: totalBytes,
-      runner: (task) => _runPack(task, files),
+      runner: (task) => _withReauth(() => _runPack(task, files, skip)),
     )..setDetail('新增 ${formatBytes(totalBytes)} · 已有跳过 ${formatBytes(skippedBytes)}');
     _queue.enqueue(task);
   }
 
   /// 消费打包流：逐帧落盘 + SHA-256 校验（帧自带指纹，落盘后复核）。
-  Future<void> _runPack(TransferTask task, List<FsEntry> files) async {
+  Future<void> _runPack(TransferTask task, List<FsEntry> files, Set<String> skip) async {
     final inbox = await _inboxDir();
-    final skip = <String>{};
-    for (final f in files) {
-      final local = File('${inbox.path}/${sanitizeFilename(f.name)}');
-      if (local.existsSync() && await local.length() == f.size) {
-        skip.add(await sha256FileHex(local));
-      }
-    }
     final reader = await _client!.pack(
       _remoteBase!,
       files.map((f) => f.path).toList(),
       skip: skip,
     );
     var received = 0;
-    while (true) {
-      final frame = await reader.next();
-      if (frame == null) {
-        break;
-      }
-      task.setDetail('正在 ${frame.name}');
-      final target = File('${inbox.path}/${sanitizeFilename(frame.name)}');
-      final sink = target.openWrite();
-      var ok = true;
-      try {
-        await sink.addStream(countBytes(frame.data, task.addBytes));
-        await sink.flush();
-      } on Object {
-        ok = false;
-        rethrow;
-      } finally {
-        await sink.close();
-        if (!ok) {
-          await target.delete(); // 半截文件不留在收件箱
+    try {
+      while (true) {
+        _throwIfCanceled(task);
+        final frame = await reader.next();
+        if (frame == null) {
+          break;
         }
+        task.setDetail('正在 ${frame.name}');
+        final target = File('${inbox.path}/${sanitizeFilename(frame.name)}');
+        final sink = target.openWrite();
+        var ok = true;
+        try {
+          await sink.addStream(
+            countBytes(frame.data, (d) {
+              _throwIfCanceled(task);
+              task.addBytes(d);
+            }),
+          );
+          await sink.flush();
+        } on Object {
+          ok = false;
+          rethrow;
+        } finally {
+          await sink.close();
+          if (!ok) {
+            await target.delete(); // 半截文件不留在收件箱
+          }
+        }
+        final sha = await sha256FileHex(target);
+        if (sha != frame.shaHex) {
+          await target.delete();
+          throw MlfClientException('${frame.name} 校验失败（传输损坏）');
+        }
+        received++;
       }
-      final sha = await sha256FileHex(target);
-      if (sha != frame.shaHex) {
-        await target.delete();
-        throw MlfClientException('${frame.name} 校验失败（传输损坏）');
-      }
-      received++;
+    } finally {
+      // 提前退出（取消/错误）也关闭底层连接，避免泄漏。
+      await reader.cancel();
     }
-    await reader.cancel();
     task.setDetail('新增 $received 个 · 跳过 ${files.length - received} 个已存在');
   }
 
@@ -393,6 +519,10 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
           : ListView(
               padding: const EdgeInsets.all(12),
               children: [
+                if (Platform.isAndroid && _manageGranted == false) ...[
+                  _buildManageCard(),
+                  const SizedBox(height: 8),
+                ],
                 _buildServerCard(),
                 const SizedBox(height: 8),
                 _buildConnectRow(),
@@ -447,7 +577,20 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     );
   }
 
+  /// Android/iOS：相机扫码填入配对信息并连接；桌面端无相机扫码，走粘贴。
+  Future<void> _scanAndConnect() async {
+    final result = await Navigator.of(context).push<String>(
+      MaterialPageRoute(builder: (context) => const MlfQrScanPage()),
+    );
+    if (result == null || result.isEmpty || !mounted) {
+      return;
+    }
+    _addressController.text = result;
+    await _connect();
+  }
+
   Widget _buildConnectRow() {
+    final canScan = Platform.isAndroid || Platform.isIOS;
     return Column(
       children: [
         Row(
@@ -456,11 +599,19 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               child: TextField(
                 controller: _addressController,
                 decoration: const InputDecoration(
-                  labelText: '配对信息（粘贴二维码内容）',
+                  labelText: '配对信息（粘贴或扫码）',
                   hintText: '{"v":1,"proto":"mlf",...}',
                 ),
               ),
             ),
+            if (canScan) ...[
+              const SizedBox(width: 8),
+              IconButton(
+                icon: const Icon(Icons.qr_code_scanner),
+                tooltip: '扫码配对',
+                onPressed: () => unawaited(_scanAndConnect()),
+              ),
+            ],
             const SizedBox(width: 8),
             FilledButton(onPressed: _connect, child: const Text('连接')),
           ],
@@ -475,6 +626,26 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
             ),
           ),
       ],
+    );
+  }
+
+  /// Android 未授「所有文件访问」时的引导卡（§4.1 浏览整个存储的前提）。
+  Widget _buildManageCard() {
+    return Card(
+      color: Theme.of(context).colorScheme.secondaryContainer,
+      child: ListTile(
+        leading: const Icon(Icons.folder_special),
+        title: const Text('授予「所有文件访问」以共享手机存储'),
+        subtitle: const Text(
+          '未授予时：共享根与收件箱降级为应用私有目录。\n'
+          '系统设置 → 所有文件访问 → 允许 MyLanFiles',
+        ),
+        isThreeLine: true,
+        trailing: FilledButton(
+          onPressed: () => unawaited(_requestManage()),
+          child: const Text('去授予'),
+        ),
+      ),
     );
   }
 
@@ -592,7 +763,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                 Text('传输队列（${_queue.activeCount} 活跃 / ${tasks.length} 总计）'),
                 const Spacer(),
                 if (tasks.any(
-                  (t) => t.state == TransferState.done || t.state == TransferState.failed,
+                  (t) => t.state == TransferState.done || t.state == TransferState.failed || t.state == TransferState.canceled,
                 ))
                   TextButton(
                     onPressed: _queue.clearFinished,
@@ -628,11 +799,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                     TransferState.running => Icons.sync,
                     TransferState.done => Icons.check_circle,
                     TransferState.failed => Icons.error,
+                    TransferState.canceled => Icons.cancel_outlined,
                   },
                   size: 18,
                   color: switch (task.state) {
                     TransferState.done => Colors.green,
                     TransferState.failed => Theme.of(context).colorScheme.error,
+                    TransferState.canceled => Colors.orange,
                     _ => Colors.grey,
                   },
                 ),
@@ -647,7 +820,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                   '${formatBytes(task.receivedBytes)} / ${formatBytes(task.totalBytes)}',
                   style: Theme.of(context).textTheme.bodySmall,
                 ),
-                if (failed)
+                if (task.state == TransferState.running || task.state == TransferState.queued)
+                  IconButton(
+                    icon: const Icon(Icons.close, size: 18),
+                    tooltip: '取消（保留断点）',
+                    onPressed: () => task.cancel(),
+                  ),
+                if (failed || task.state == TransferState.canceled)
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 18),
                     tooltip: '重试（断点续传）',

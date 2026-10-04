@@ -16,9 +16,15 @@ TransferMode pickTransferMode(Iterable<int> fileSizes) {
   return median < 2 * 1024 * 1024 ? TransferMode.pack : TransferMode.sequential;
 }
 
-enum TransferState { queued, running, done, failed }
+enum TransferState { queued, running, done, failed, canceled }
 
 enum TransferKind { singleFile, pack }
+
+/// Thrown by runners when the user cancels; the queue marks the task
+/// canceled instead of failed (partial data is kept where meaningful).
+class TaskCanceledException implements Exception {
+  const TaskCanceledException();
+}
 
 /// One row in the queue. The actual IO lives in [runner]; progress is
 /// reported back through [addBytes] / [setDetail].
@@ -35,7 +41,8 @@ class TransferTask extends ChangeNotifier {
   final int totalBytes;
 
   /// Performs the transfer; call [addBytes] as data arrives. Thrown errors
-  /// mark the task failed (retry may resume — e.g. the `.part` file is kept).
+  /// mark the task failed; [TaskCanceledException] marks it canceled (retry
+  /// may resume — e.g. the `.part` file is kept).
   final Future<void> Function(TransferTask task) runner;
 
   int receivedBytes = 0;
@@ -45,11 +52,23 @@ class TransferTask extends ChangeNotifier {
   /// Free-form status ("正在 b.txt 3/10"、"跳过 2 个已存在").
   String detail = '';
 
+  bool _cancelRequested = false;
+
   Duration _notifyInterval = const Duration(milliseconds: 80);
   DateTime _lastNotify = DateTime.fromMillisecondsSinceEpoch(0);
 
   @visibleForTesting
   set notifyInterval(Duration value) => _notifyInterval = value;
+
+  bool get cancelRequested => _cancelRequested;
+
+  /// Requests cancellation; runners observe it at their next checkpoint.
+  void cancel() {
+    if (state == TransferState.done) {
+      return;
+    }
+    _cancelRequested = true;
+  }
 
   double get progress => totalBytes <= 0 ? (state == TransferState.done ? 1.0 : 0.0) : (receivedBytes / totalBytes).clamp(0.0, 1.0);
 
@@ -88,7 +107,11 @@ class TransferQueue extends ChangeNotifier {
 
   bool get isBusy => _tasks.any((t) => t.state == TransferState.running);
 
-  int get activeCount => _tasks.where((t) => t.state == TransferState.queued || t.state == TransferState.running).length;
+  int get activeCount => _tasks
+      .where(
+        (t) => t.state == TransferState.queued || t.state == TransferState.running,
+      )
+      .length;
 
   void enqueue(TransferTask task) {
     _tasks.add(task);
@@ -107,6 +130,12 @@ class TransferQueue extends ChangeNotifier {
         if (next == null) {
           break;
         }
+        if (next.cancelRequested) {
+          next.state = TransferState.canceled;
+          next.notifyListeners();
+          notifyListeners();
+          continue;
+        }
         next
           ..state = TransferState.running
           ..setDetail('');
@@ -114,6 +143,8 @@ class TransferQueue extends ChangeNotifier {
         try {
           await next.runner(next);
           next.state = TransferState.done;
+        } on TaskCanceledException {
+          next.state = TransferState.canceled;
         } on Object catch (e) {
           next
             ..state = TransferState.failed
@@ -127,12 +158,14 @@ class TransferQueue extends ChangeNotifier {
     }
   }
 
-  /// Re-queues a failed task (runner decides how to resume).
+  /// Re-queues a failed or canceled task (runner decides how to resume).
+  /// Clears a pending cancel — retry is an explicit go.
   void retry(TransferTask task) {
-    if (task.state != TransferState.failed) {
+    if (task.state != TransferState.failed && task.state != TransferState.canceled) {
       return;
     }
     task
+      .._cancelRequested = false
       ..state = TransferState.queued
       ..error = null
       ..notifyListeners();
@@ -142,7 +175,7 @@ class TransferQueue extends ChangeNotifier {
 
   void clearFinished() {
     _tasks.removeWhere(
-      (t) => t.state == TransferState.done || t.state == TransferState.failed,
+      (t) => t.state == TransferState.done || t.state == TransferState.failed || t.state == TransferState.canceled,
     );
     notifyListeners();
   }

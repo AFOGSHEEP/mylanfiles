@@ -26,6 +26,12 @@
     <uses-feature android:name="android.software.leanback" android:required="false" />
     <uses-feature android:name="android.hardware.touchscreen" android:required="false" />
 
+    <!-- MyLanFiles: QR pairing camera (optional) and all-files-access for the
+         browse/share server root (guided in-app on Android 11+). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-permission android:name="android.permission.MANAGE_EXTERNAL_STORAGE" tools:ignore="ScopedStorage" />
+
     <application
         android:label="LocalSend"
         android:name="${applicationName}"
