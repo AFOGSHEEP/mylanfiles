@@ -19,12 +19,14 @@ class MlfPairingInfo {
     required this.ip,
     required this.port,
     required this.fingerprint,
+    this.alias,
   });
 
   factory MlfPairingInfo.fromJson(Map<dynamic, dynamic> json) => MlfPairingInfo(
     ip: json['ip'] as String,
     port: (json['port'] as num).toInt(),
     fingerprint: (json['fp'] as String).toLowerCase(),
+    alias: json['al'] as String?,
   );
 
   /// Accepts either the QR JSON or a bare `https://host:port` URL (fingerprint
@@ -40,7 +42,7 @@ class MlfPairingInfo {
     if (uri.host.isEmpty || uri.port == 0) {
       throw FormatException('not a pairing QR or URL: $raw');
     }
-    return MlfPairingInfo(ip: uri.host, port: uri.port, fingerprint: '');
+    return MlfPairingInfo(ip: uri.host, port: uri.port, fingerprint: '', alias: null);
   }
 
   final String ip;
@@ -50,12 +52,16 @@ class MlfPairingInfo {
   /// info came from a bare URL.
   final String fingerprint;
 
+  /// Human-facing device name (hostname / model); absent in bare URLs.
+  final String? alias;
+
   Map<String, Object?> toJson() => {
     'v': 1,
     'proto': 'mlf',
     'ip': ip,
     'port': port,
     'fp': fingerprint,
+    if (alias != null && alias!.isNotEmpty) 'al': alias,
   };
 
   Uri get baseUri => Uri.parse('https://$ip:$port/');

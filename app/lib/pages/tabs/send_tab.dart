@@ -5,7 +5,6 @@ import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/send_mode.dart';
 import 'package:localsend_app/pages/device_details_page.dart';
 import 'package:localsend_app/pages/mylanfiles_browse_page.dart';
-import 'package:localsend_app/pages/mylanfiles_probe_page.dart';
 import 'package:localsend_app/pages/selected_files_page.dart';
 import 'package:localsend_app/pages/tabs/send_tab_vm.dart';
 import 'package:localsend_app/pages/troubleshoot_page.dart';
@@ -233,20 +232,14 @@ class SendTab extends StatelessWidget {
               );
             }),
             const SizedBox(height: 10),
+            // MyLanFiles 主入口：浏览/传输对端文件与相册（P1 核心场景）。
             Center(
-              child: TextButton(
-                onPressed: () async {
-                  await context.push(() => const MyLanFilesProbePage());
-                },
-                child: const Text('MyLanFiles Probe (spike1)'),
-              ),
-            ),
-            Center(
-              child: TextButton(
+              child: OutlinedButton.icon(
                 onPressed: () async {
                   await context.push(() => const MyLanFilesBrowsePage());
                 },
-                child: const Text('MyLanFiles 浏览'),
+                icon: const Icon(Icons.folder_shared_outlined),
+                label: const Text('浏览对端文件 / 相册'),
               ),
             ),
             Center(

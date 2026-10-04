@@ -33,6 +33,7 @@ class MlfServer {
     bool allowPairing = true,
     RateLimiter? rateLimiter,
     MediaService? media,
+    this.onPaired,
   }) : _vfs = vfs,
        _serverFingerprint = serverFingerprint,
        _paired = {...pairedFingerprints},
@@ -46,6 +47,9 @@ class MlfServer {
 
   final Vfs _vfs;
   final MediaService _media;
+
+  /// Fires after each successful pairing (host app persists the table).
+  final void Function(String fingerprint)? onPaired;
 
   /// /pair 端点自己的限速器（R-014）：业务失败黑名单不锁扫码恢复路径，
   /// 但爆破 pair 本身仍会被它锁住。
@@ -165,6 +169,7 @@ class MlfServer {
       return Response(400, body: jsonEncode({'error': 'invalid fingerprint'}));
     }
     _paired.add(fingerprint!);
+    onPaired?.call(fingerprint);
     // 成功配对是强合法信号：清掉两套限速状态，扫码恢复路径立即解锁（R-014）。
     _rateLimiter.reset();
     _pairLimiter.reset();

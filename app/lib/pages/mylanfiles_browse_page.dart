@@ -54,6 +54,10 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   // 上传全部结束后刷新目录列表（配对 _queue 监听）。
   bool _refreshAfterUploads = false;
 
+  // 记忆化：已配对过的对端（客户端侧）与本机服务端口/配对表（服务端侧）。
+  List<_RememberedServer> _servers = [];
+  Directory? _identityDir;
+
   final TransferQueue _queue = TransferQueue();
 
   @override
@@ -65,6 +69,9 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     // 开发/联调捷径：MLF_AUTO_SERVER=1 启动即自动开服务并打印配对 JSON
     // （无人值守 E2E 用；不影响正常启动路径）。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      unawaited(_loadRememberedServers().then((_) => _autoConnectLastUsed()));
+    });
     if (Platform.environment['MLF_AUTO_SERVER'] == '1') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_autoStartForE2E());
@@ -305,6 +312,116 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     return inbox.parent.path;
   }
 
+  // ---- 记忆化：服务端端口/配对表 + 客户端已配对设备 ----
+
+  Future<File> _serverPrefsFile() async => File('${_identityDir!.path}/server.json');
+
+  Future<Map<dynamic, dynamic>> _loadServerPrefs() async {
+    try {
+      final f = await _serverPrefsFile();
+      if (await f.exists()) {
+        return jsonDecode(await f.readAsString()) as Map<dynamic, dynamic>;
+      }
+    } on Object {
+      /* 损坏则重来 */
+    }
+    return {};
+  }
+
+  Future<void> _saveServerPrefs(int port, Set<String> paired) async {
+    try {
+      final f = await _serverPrefsFile();
+      await f.writeAsString(
+        jsonEncode({'port': port, 'paired': paired.toList()}),
+        flush: true,
+      );
+    } on Object catch (e) {
+      debugPrint('[MLF] server-prefs save failed: ' + e.toString());
+    }
+  }
+
+  Future<File> _pairedServersFile() async {
+    final support = await getApplicationSupportDirectory();
+    return File('${support.path}/paired-servers.json');
+  }
+
+  Future<void> _loadRememberedServers() async {
+    try {
+      final f = await _pairedServersFile();
+      if (!await f.exists()) {
+        return;
+      }
+      final body = jsonDecode(await f.readAsString()) as Map<dynamic, dynamic>;
+      final list = (body['servers'] as List?) ?? const [];
+      setState(() {
+        _servers =
+            list
+                .map(
+                  (m) => _RememberedServer.fromMap(m as Map<dynamic, dynamic>),
+                )
+                .toList()
+              ..sort((a, b) => b.lastUsedMs.compareTo(a.lastUsedMs));
+      });
+    } on Object catch (e) {
+      debugPrint('[MLF] load remembered servers failed: ' + e.toString());
+    }
+  }
+
+  Future<void> _rememberServer(MlfPairingInfo info) async {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    // 别名优先级：本次 QR 携带 > 历史记忆 > IP。
+    final previous = _servers.where((s) => s.fp == info.fingerprint).toList();
+    final alias = info.alias?.isNotEmpty == true
+        ? info.alias!
+        : previous.isNotEmpty && previous.first.alias.isNotEmpty
+        ? previous.first.alias
+        : info.ip;
+    setState(() {
+      _servers
+        ..removeWhere((s) => s.fp == info.fingerprint)
+        ..insert(
+          0,
+          _RememberedServer(
+            alias: alias,
+            ip: info.ip,
+            port: info.port,
+            fp: info.fingerprint,
+            lastUsedMs: now,
+          ),
+        );
+    });
+    try {
+      final f = await _pairedServersFile();
+      await f.writeAsString(
+        jsonEncode({
+          'servers': _servers.take(10).map((s) => s.toMap()).toList(), // 只记最近 10 台
+        }),
+        flush: true,
+      );
+    } on Object catch (e) {
+      debugPrint('[MLF] save remembered servers failed: ' + e.toString());
+    }
+  }
+
+  /// 设备别名：桌面=主机名；Android=机型（build.prop）。
+  String _deviceAlias() {
+    if (Platform.isAndroid) {
+      try {
+        final prop = File('/system/build.prop').readAsStringSync();
+        final m = RegExp(r'ro[.]product[.]model=(.+)').firstMatch(prop);
+        final model = m?.group(1)?.trim();
+        if (model != null && model.isNotEmpty) {
+          return model;
+        }
+      } on Object {
+        /* fallthrough */
+      }
+      return 'Android 设备';
+    }
+    final h = Platform.localHostname;
+    return h.isEmpty ? '本机' : h;
+  }
+
   // ---- 本机服务（TLS + QR 配对）----
 
   Future<void> _toggleServer() async {
@@ -321,21 +438,48 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       }
       // 身份持久化在应用私有目录（共享根之外，私钥不可经共享根泄露）。
       final support = await getApplicationSupportDirectory();
-      _identity = await loadOrCreateIdentity(
-        Directory('${support.path}/identity'),
-      );
+      _identityDir = Directory('${support.path}/identity');
+      _identity = await loadOrCreateIdentity(_identityDir!);
+      // 记忆化：复用上次端口（二维码/已配对设备跨重启有效）+ 已配对表。
+      final prefs = await _loadServerPrefs();
+      final savedPort = (prefs['port'] as num?)?.toInt() ?? 0;
+      final savedPaired = ((prefs['paired'] as List?) ?? const []).whereType<String>().toSet();
       _rootPath = await _sharedRoot();
       final server = MlfServer(
         vfs: LocalVfs(root: _rootPath!),
         serverFingerprint: _identity!.fingerprint,
+        pairedFingerprints: savedPaired,
+        onPaired: (fp) {
+          final s = _server;
+          if (s != null) {
+            unawaited(_saveServerPrefs(s.port, s.pairedFingerprints));
+          }
+        },
       );
-      await server.bind(
-        InternetAddress.anyIPv4,
-        0,
-        securityContext: _identity!.context,
-      );
+      var bound = false;
+      if (savedPort > 0) {
+        try {
+          await server.bind(
+            InternetAddress.anyIPv4,
+            savedPort,
+            securityContext: _identity!.context,
+          );
+          bound = true;
+        } on Object {
+          debugPrint('[MLF] saved port $savedPort busy, using ephemeral');
+        }
+      }
+      if (!bound) {
+        await server.bind(
+          InternetAddress.anyIPv4,
+          0,
+          securityContext: _identity!.context,
+        );
+      }
+      await _saveServerPrefs(server.port, server.pairedFingerprints);
       _server = server;
       _lanIp = await lanIPv4();
+      debugPrint('[MLF] server up: $_lanIp:${server.port} root=$_rootPath');
       setState(() {});
     } on Object catch (e) {
       setState(() => _error = '服务启动失败: $e');
@@ -348,6 +492,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     ip: ip,
     port: _server?.port ?? 0,
     fingerprint: _identity?.fingerprint ?? '',
+    alias: _deviceAlias(),
   );
 
   Future<void> _showPairingQr() async {
@@ -419,6 +564,17 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
 
   // ---- 远程连接（指纹 pin 握手）----
 
+  /// 打开页面时静默重连上次使用的对端（记忆化的核心收益：零操作恢复）。
+  Future<void> _autoConnectLastUsed() async {
+    if (_servers.isEmpty || _addressController.text.isNotEmpty || _client != null) {
+      return;
+    }
+    final last = _servers.first;
+    debugPrint('[MLF] auto-reconnect: ' + last.alias);
+    _addressController.text = last.pairingJson;
+    await _connect();
+  }
+
   Future<void> _connect() async {
     final raw = _addressController.text.trim();
     debugPrint('[MLF] connect tapped, raw=${raw.isEmpty ? "<empty>" : raw}');
@@ -449,6 +605,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       _client = client;
       _remoteBase = info.baseUri;
       debugPrint('[MLF] pair ok -> ${info.baseUri}');
+      await _rememberServer(info);
       await _listDir('/');
       setState(() {});
     } on Object catch (e) {
@@ -757,6 +914,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                 ],
                 _buildServerCard(),
                 const SizedBox(height: 8),
+                _buildServerChips(),
                 _buildConnectRow(),
                 if (_error != null)
                   Padding(
@@ -819,6 +977,34 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     _addressController.text = result;
     await _connect();
+  }
+
+  Widget _buildServerChips() {
+    if (_servers.isEmpty || _remoteBase != null) {
+      return const SizedBox.shrink();
+    }
+    return SizedBox(
+      height: 44,
+      child: ListView.separated(
+        scrollDirection: Axis.horizontal,
+        itemCount: _servers.length,
+        separatorBuilder: (_, _) => const SizedBox(width: 8),
+        itemBuilder: (context, i) {
+          final s = _servers[i];
+          return ActionChip(
+            avatar: Icon(
+              s.fp == _servers.first.fp && i == 0 ? Icons.history : Icons.devices_other,
+              size: 18,
+            ),
+            label: Text(s.alias.isEmpty ? s.ip : s.alias),
+            onPressed: () {
+              _addressController.text = s.pairingJson;
+              unawaited(_connect());
+            },
+          );
+        },
+      ),
+    );
   }
 
   Widget _buildConnectRow() {
@@ -1091,6 +1277,40 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       },
     );
   }
+}
+
+class _RememberedServer {
+  _RememberedServer({
+    required this.alias,
+    required this.ip,
+    required this.port,
+    required this.fp,
+    required this.lastUsedMs,
+  });
+
+  factory _RememberedServer.fromMap(Map<dynamic, dynamic> m) => _RememberedServer(
+    alias: m['alias'] as String? ?? '',
+    ip: m['ip'] as String,
+    port: (m['port'] as num).toInt(),
+    fp: m['fp'] as String,
+    lastUsedMs: (m['lastUsed'] as num?)?.toInt() ?? 0,
+  );
+
+  final String alias;
+  final String ip;
+  final int port;
+  final String fp;
+  final int lastUsedMs;
+
+  Map<String, Object?> toMap() => {'alias': alias, 'ip': ip, 'port': port, 'fp': fp, 'lastUsed': lastUsedMs};
+
+  String get pairingJson => jsonEncode({
+    'v': 1,
+    'proto': 'mlf',
+    'ip': ip,
+    'port': port,
+    'fp': fp,
+  });
 }
 
 String formatBytes(int bytes) {
