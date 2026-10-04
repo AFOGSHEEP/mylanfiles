@@ -230,8 +230,9 @@ class MlfClient {
   }
 
   /// Raw chunked PUT (§4.1 fs/write). [offset] > 0 resumes the remote file
-  /// at that byte position. Returns the remote size reported by the server.
-  Future<int> write(
+  /// at that byte position. Returns (remote size, remote sha256 hex) — the
+  /// server hashes on the fly (upload integrity receipt).
+  Future<(int, String)> write(
     Uri base,
     String path,
     Stream<List<int>> body,
@@ -250,11 +251,9 @@ class MlfClient {
       await res.stream.drain<void>().catchError((Object _) {});
       throw MlfClientException('write failed: ${res.statusCode}');
     }
-    final size =
-        (jsonDecode(await res.stream.bytesToString())
-                as Map<dynamic, dynamic>)['size']
-            as int;
-    return size;
+    final parsed =
+        jsonDecode(await res.stream.bytesToString()) as Map<dynamic, dynamic>;
+    return ((parsed['size'] as num).toInt(), parsed['sha256'] as String? ?? '');
   }
 
   /// Generic fs/op invocation (§4.1): copy|move|delete|rename|mkdir.
@@ -313,7 +312,7 @@ class MlfClient {
 
     onProgress?.call(offset, total);
     var sent = offset;
-    final size = await write(
+    final (size, remoteSha) = await write(
       base,
       partPath,
       countBytes(
@@ -325,6 +324,15 @@ class MlfClient {
     if (size != total) {
       throw MlfClientException(
         'upload incomplete: server reports $size of $total bytes',
+      );
+    }
+    // 完整性回执:全新上传(offset==0)时服务端哈希即全文件哈希,逐字节比对;
+    // 续传时回执仅覆盖本次追加段,以长度校验为准(语义记录于协议注释)。
+    final localSha = offset == 0 ? await sha256FileHex(file) : remoteSha;
+    if (remoteSha.isNotEmpty && remoteSha != localSha) {
+      await op(base, 'delete', {'path': partPath});
+      throw MlfClientException(
+        'upload integrity mismatch (remote $remoteSha, local $localSha)',
       );
     }
     await op(base, 'rename', {'path': partPath, 'newName': name});

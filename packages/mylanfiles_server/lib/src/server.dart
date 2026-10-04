@@ -73,6 +73,10 @@ class MlfServer {
        );
 
   final Vfs _vfs;
+
+  /// Exposes the VFS for host-side housekeeping (stale .part sweep etc).
+  Vfs get vfs => _vfs;
+
   final MediaService _media;
   final ThumbService _thumb;
 
@@ -105,6 +109,7 @@ class MlfServer {
       ..put('/api/v1/fs/write', _write)
       ..post('/api/v1/fs/op', _op)
       ..post('/api/v1/pack', _pack)
+      ..get('/api/v1/fs/stat', _stat)
       ..get('/api/v1/media/list', _mediaList)
       ..get('/api/v1/thumb', _thumbEndpoint);
     return const Pipeline().addMiddleware(_auth()).addHandler(router.call);
@@ -268,12 +273,23 @@ class MlfServer {
       return Response(400, body: jsonEncode({'error': 'bad offset'}));
     }
     try {
+      // 流式哈希:边写边算,上传完整性由服务端回执(对抗轮2后的闭环)。
+      final sink = ChunkedDigestSink();
+      final byteSink = sha256.startChunkedConversion(sink);
       final size = await _vfs.write(
         params['path'] ?? '/',
-        req.read(),
+        req.read().map((chunk) {
+          byteSink.add(chunk);
+          return chunk;
+        }),
         offset: offset,
       );
-      return Response.ok(jsonEncode({'size': size}), headers: _jsonHeaders);
+      byteSink.close();
+      final sha = sink.value;
+      return Response.ok(
+        jsonEncode({'size': size, 'sha256': sha.toString()}),
+        headers: _jsonHeaders,
+      );
     } on PathAccessException {
       return _forbidden();
     } on VfsIsDirException {
@@ -448,6 +464,22 @@ class MlfServer {
     }
   }
 
+  /// GET /api/v1/fs/stat?path= — 单条目元数据(虚拟路径)。
+  Future<Response> _stat(Request req) async {
+    final pathParam = req.url.queryParameters['path'];
+    final path = (pathParam == null || pathParam.isEmpty) ? '/' : pathParam;
+    try {
+      final entry = await _vfs.stat(path);
+      return Response.ok(jsonEncode(entry.toMap()), headers: _jsonHeaders);
+    } on PathAccessException {
+      return _forbidden();
+    } on VfsNotFoundException {
+      return _notFound();
+    } on VfsIsDirException {
+      return _conflict('is a directory');
+    }
+  }
+
   /// GET /api/v1/thumb?token=&size= — token 由 media/list 签发(防路径枚举)。
   Future<Response> _thumbEndpoint(Request req) async {
     final params = req.url.queryParameters;
@@ -490,4 +522,15 @@ class MlfServer {
       Response(404, body: jsonEncode({'error': 'not found'}));
   Response _conflict(String reason) =>
       Response(409, body: jsonEncode({'error': reason}));
+}
+
+/// 收集分块哈希的最终值(小工具,避免 Stream<Digest> 中转)。
+class ChunkedDigestSink implements Sink<Digest> {
+  Digest? value;
+
+  @override
+  void add(Digest data) => value = data;
+
+  @override
+  void close() {}
 }

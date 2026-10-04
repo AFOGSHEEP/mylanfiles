@@ -20,6 +20,8 @@ class MediaService {
   /// 可选：给 image/video 条目签发缩略图 token（§4.1，防路径枚举）。
   final ThumbService? _thumb;
 
+  final Map<String, _BucketCacheEntry> _bucketCache = {};
+
   static const knownBuckets = [
     'DCIM',
     'Pictures',
@@ -106,14 +108,57 @@ class MediaService {
       _ => imageExt.union(videoExt).union(audioExt),
     };
 
+    // 桶级缓存:目录未变(根 mtime)且 30s 内直接复用,避免大相册重复全walk。
+    final cacheKey = bucketEntry.name.toLowerCase();
+    final cached = _bucketCache[cacheKey];
+    DateTime? rootMtime;
+    try {
+      rootMtime = (await _vfs.stat(bucketEntry.path)).mtime;
+    } on Object {
+      /* stat 失败则不缓存 */
+    }
+    if (cached != null &&
+        rootMtime != null &&
+        cached.rootMtime == rootMtime &&
+        DateTime.now().difference(cached.fetchedAt) <
+            const Duration(seconds: 30)) {
+      return _pageFrom(cached.entries, bucketEntry, exts, since, offset, limit);
+    }
+
+    // 缓存与过滤解耦:walk 收全量,type/since 在分页时应用。
     final media = <FsEntry>[];
-    await _walk(bucketEntry.path, 0, exts, since, media);
-    media.sort(
-      (a, b) => (b.mtime?.millisecondsSinceEpoch ?? 0).compareTo(
-        a.mtime?.millisecondsSinceEpoch ?? 0,
-      ),
+    await _walk(
+      bucketEntry.path,
+      0,
+      imageExt.union(videoExt).union(audioExt),
+      null,
+      media,
     );
 
+    if (rootMtime != null) {
+      _bucketCache[cacheKey] = _BucketCacheEntry(
+        entries: List.of(media),
+        fetchedAt: DateTime.now(),
+        rootMtime: rootMtime,
+      );
+    }
+    return _pageFrom(media, bucketEntry, exts, since, offset, limit);
+  }
+
+  Map<String, Object?> _pageFrom(
+    List<FsEntry> all,
+    FsEntry bucketEntry,
+    Set<String> exts,
+    int? since,
+    int offset,
+    int limit,
+  ) {
+    final media = all.where((e) => _matches(e, exts, since)).toList()
+      ..sort(
+        (a, b) => (b.mtime?.millisecondsSinceEpoch ?? 0).compareTo(
+          a.mtime?.millisecondsSinceEpoch ?? 0,
+        ),
+      );
     final total = media.length;
     final page = media.skip(offset).take(limit).map((e) {
       final m = e.toMap()..['kind'] = _kindOf(e.name);
@@ -305,4 +350,54 @@ class ThumbService {
     );
     return Uint8List.fromList(img.encodeJpg(thumb, quality: 78));
   }
+}
+
+/// 清理超龄断点文件(`.part`/`.mlfpart`):上传输half与下载half的孤儿。
+/// 返回删除数;walk 深度受限,避免全盘扫(手机端共享根可能极大)。
+Future<int> cleanupStaleParts(
+  Vfs vfs, {
+  Duration age = const Duration(days: 7),
+  int maxDepth = 3,
+}) async {
+  var removed = 0;
+  Future<void> walk(String dir, int depth) async {
+    if (depth >= maxDepth) {
+      return;
+    }
+    final List<FsEntry> entries;
+    try {
+      entries = await vfs.list(dir);
+    } on Object {
+      return;
+    }
+    for (final e in entries) {
+      if (e.isDir) {
+        await walk(e.path, depth + 1);
+      } else if ((e.name.endsWith('.part') || e.name.endsWith('.mlfpart')) &&
+          e.mtime != null &&
+          DateTime.now().difference(e.mtime!) > age) {
+        try {
+          await vfs.delete(e.path);
+          removed++;
+        } on Object {
+          /* 竞争删除失败忽略 */
+        }
+      }
+    }
+  }
+
+  await walk('/', 0);
+  return removed;
+}
+
+class _BucketCacheEntry {
+  _BucketCacheEntry({
+    required this.entries,
+    required this.fetchedAt,
+    required this.rootMtime,
+  });
+
+  final List<FsEntry> entries;
+  final DateTime fetchedAt;
+  final DateTime rootMtime;
 }

@@ -486,6 +486,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       await _saveServerPrefs(server.port, server.pairedFingerprints);
       _server = server;
       _lanIp = await lanIPv4();
+      // 后台清理超龄断点文件(7 天+,不阻塞启动)。
+      unawaited(
+        cleanupStaleParts(server.vfs).then(
+          (n) => n > 0 ? debugPrint('[MLF] cleaned $n stale .part files') : null,
+        ),
+      );
       debugPrint('[MLF] server up: $_lanIp:${server.port} root=$_rootPath');
       setState(() {});
     } on Object catch (e) {
