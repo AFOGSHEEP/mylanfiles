@@ -49,6 +49,7 @@ Future<void> main(List<String> args) async {
   // and logs machine-readable [MLF] lines. No effect otherwise.
   final mlfAuto =
       Platform.environment['MLF_AUTO_SERVER'] == '1' ||
+      Platform.environment['MLF_OPEN_BROWSE'] == '1' ||
       (!Platform.isAndroid &&
           Platform.environment['MLF_PAIR_FILE']?.isNotEmpty == true) ||
       (Platform.isAndroid &&
