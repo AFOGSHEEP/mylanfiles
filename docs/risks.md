@@ -70,20 +70,42 @@
 - **解法**：✅ 已 pin `flutter_rust_bridge: 2.12.0`（精确版本）+ 重新解析 lock，`fix(deps)` 提交；debug 冒烟复测 0 个 init 错误。教训：**凡提交生成代码的包，依赖约束一律精确 pin**（cargokit/FRB 类桥接尤甚）。
 - **是否动摇 B 级**：否（上游集成层问题）。
 
-### R-009（⚠️ 约束变更，已按决策人口头指示执行）「不开模拟器」调整为「模拟器做功能面，性能/OEM 验收留真机」
+### R-009（✅ 已解除）「不开模拟器」约束变更 → 真机到场，模拟器方案归档
 
-- **背景**：交接文档 §3 明确「不开模拟器」。2026-10-01 决策人主动提出「用虚拟机」代替真机在场，以解除开发阻塞。
-- **调整后口径**：Android 模拟器承担**功能面**（Android 构建链 bring-up、权限引导页、MediaStore、配对/浏览/打包/断点全链路 E2E、上游互传功能验证）；以下各项**模拟器数据不可信**，仍留真机：雷区 #5（打包流 29× 增益，依赖真实 Wi-Fi RTT，虚拟网卡 RTT≈0）、雷区 #6（OEM 杀后台，模拟器是 AOSP）、热点场景、相机扫 QR、BLE、Windows 防火墙 LAN 入站规则（模拟器流量经 qemu 走宿主内部，不触发真实入站）。P0 验收「-d 安卓机互传」：模拟器过功能，真机补测章。
-- **本机可行性探测（2026-10-01）**：`HypervisorPresent=True`（WHPX 加速可用；此时 VT-firmware 显示 False 属正常，VT 已被 Hyper-V 接管）；`F:\SDK` 已有 emulator 主程序/JDK17/build-tools 36/37/platforms android-36；**缺** system-images、NDK（cargokit Rust Android 构建必需），共约 2–3GB，dl.google.com 直连可下；无 AVD（avdmanager 现建）。F 盘余 35GB，充足。注意：模拟器是 x86_64 镜像，Rust 需加 `x86_64-linux-android` target（真机再补 `aarch64-linux-android`），rustup 走 rsproxy。
-- **是否动摇 B 级**：否（验收手段调整，验收项本身不变）。
+- **背景**：交接文档 §3「不开模拟器」；2026-10-01 决策人指示改用虚拟机解除阻塞。
+- **结局**：2026-10-04 决策人接入真机（Xiaomi 23078RKD5C / Android 15），真机 E2E 矩阵全绿（见 status.md 第 4 次会话），模拟器路径不再需要（构建链/权限/Rust targets 均已按真机打通）。方法论保留：视觉坐标驱动 UI 精度不足（±30%），**logcat 面包屑闭环**（`[MLF]` 日志 + 文件/env 门控 E2E 钩子）是无人值守验证的正解。
+- **是否动摇 B 级**：否。
 
-### R-008 Windows 首次 anyIPv4 TLS bind 触发防火墙放行（预期内，非意外雷）
+### R-010（✅ 已解除）MIUI USB 安装门槛
+
+- **现象**：`adb install` 报 `INSTALL_FAILED_USER_RESTRICTED: Install canceled by user`；MIUI 弹窗 10s 超时自动拒绝；开发者选项默认关「USB 安装」。
+- **解法**：决策人开启「USB 安装」+ 在场点掉弹窗（首次）；后续 install 直接 Success。debug 构建包名带 `.debug` 后缀（applicationIdSuffix），appops 等命令注意用全名。
+- **是否动摇 B 级**：否（环境）。
+
+### R-011（✅ 已解除）Flutter 3.47 对上游 Android 构建的最低版本要求
+
+- **现象**：Gradle 8.13 < 8.14.0、Kotlin 2.2.0 < 2.2.20，flutter-gradle-plugin 校验直接失败。
+- **解法**：wrapper 升 8.14.3、KGP 升 2.2.20（fork 内两个小版本号改动，**可上游化**）；另有 AGP 8.12.1「即将弃用」警告（非阻塞，留观）。
+- **教训**：上游钉的构建版本组合对其 CI 的 Flutter 版本成立，对本机 3.47.5 不成立；fork 升级 Flutter 时构建链版本三件套（Gradle/Kotlin/AGP）要一起过。
+- **是否动摇 B 级**：否。
+
+### R-008 Windows 首次 anyIPv4 TLS bind 触发防火墙放行（✅ 已解除）
 
 - **现象**：浏览页服务端从 loopback 改绑 `InternetAddress.anyIPv4`（§4.1 LAN 可达所需），debug exe 首次 bind 时 Windows 防火墙可能弹放行对话框；拒绝则 LAN 对端连不上、loopback 演示不受影响。
-- **处置**：交接文档 §8 坑 1 已有预案（为调试产物加专用网络入站放行）；留待真机联调会话与用户一起过 UAC。
+- **解法**：✅ 2026-10-04 经 UAC（决策人批准）添加入站规则 `MyLanFiles Debug In`（域/专用/公用，按程序路径放行 debug exe）；真机 LAN 直连实测通过。
 - **是否动摇 B 级**：否。
 
 ## 三、已关闭（本次会话处理完的雷）
+
+| # | 雷 | 处置 |
+|---|-----|------|
+| E7 | MIUI USB 安装默认禁用 + 弹窗 10s 超时（R-010） | 决策人开开关+点弹窗 |
+| E8 | sdkmanager 拒认 JDK 版本串 `17+35-LTS` | `SKIP_JDK_VERSION_CHECK=1` |
+| E9 | Gradle 8.13/Kotlin 2.2.0 低于 Flutter 3.47 最低要求（R-011） | 升 8.14.3 / 2.2.20（可上游化） |
+| E10 | `grep -c` 计数 0 → 退出码 1 → `&&` 链断，构建静默未跑 | 判断改显式 |
+| E11 | 截图 CDN 撞名返回旧图；视觉模型坐标 ±30% 不可靠 | 放弃像素驱动；`[MLF]` 日志面包屑 + 文件/env 门控 E2E 钩子闭环 |
+| E12 | Git Bash 把设备路径 `/storage/...` 改写成本机路径 | `MSYS_NO_PATHCONV=1` |
+| E13 | 上游 app 单实例机制：旧进程不杀，新实例带新 env 启动即退出 | 起服务前 `taskkill //IM localsend_app.exe //F` |
 
 | # | 雷 | 处置 |
 |---|-----|------|
@@ -94,8 +116,12 @@
 | E5 | 中文 Windows 代码页 936：C4819 警告当错误，connectivity_plus 编译失败（`CL=/utf-8` 环境变量对 MSBuild 链无效） | CMake `add_compile_options(/utf-8)` 补丁（已进 fork，可上游化） |
 | E6 | 上游 `localsend_msix_helper.msix` 被 gitignore 但 CMake 无条件安装 → 新 clone INSTALL 步骤必失败 | 条件安装补丁（已进 fork，可上游化） |
 
-## 四、P0 尚未完成的验收项（依赖待确认清单）
+## 四、P0/P1 尚未完成的验收项（依赖待确认清单）
 
-- [ ] clone 上游 → `flutter run -d windows` / `-d 安卓机` 各跑通一次互传（阻塞：R-001/003/004 + R-006）
-- [ ] 电脑开热点 + filebrowser 手机浏览器实测（阻塞：需要用户手机在场；filebrowser 单二进制可随时部署）
-- [ ] CI 上线 + 分支保护（阻塞：GitHub 仓库初始化方案待确认，见 status.md）
+- [x] clone 上游 → Windows 构建/运行（P0，2026-09-30 达成；R-007 FRB 修复后 init 零错误）
+- [x] MyLanFiles 真机全链路（P1，2026-10-04：配对/浏览/下载/Range 续传/打包/skip，真实 Wi-Fi）
+- [ ] 上游互传手机↔Windows 一次（发现已互通；传输需 PC 端点接收确认框，等 10 分钟窗口）
+- [ ] MyLanFiles 扫码配对真机（相机对准屏幕，等 10 分钟窗口）
+- [ ] filebrowser 手机浏览器基准线体验（可随时部署，等在场）
+- [ ] CI 上线 + 分支保护（阻塞：GitHub 推送仍暂停）
+- [ ] 打包流 29× 增益 A/B 正式测速（雷区 #5；单流基线 2.7MB/s 已测）

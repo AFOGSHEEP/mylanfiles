@@ -3,75 +3,75 @@
 > **新会话快速上手（给 AI 的引导，读完本文件即可开工，无需重读全部历史）**
 > - 角色与协议：你是 MyLanFiles 的开发代理，遵守 `docs/MyLanFiles_开发交接文档.md` 的 §2.5（不确定性管理）与 §9（工作约定）；配套深度背景 `docs/MyLanFiles_可行性报告与开发计划.md` 按需查阅。
 > - 一切以本文件「当前阶段 / 下次会话计划 / 待确认」三节为准；风险与雷区见 `docs/risks.md`；关键决策见 `docs/adr/0001`、`0002`。
-> - 环境/镜像/构建命令：本文件末尾「环境速查」一节。全程不开代理。
+> - 环境/镜像/构建命令：本文件末尾「环境速查」一节。代理已放开（见速查）。
 > - 边界：不推 GitHub（决策人叫停，交接命令备好）；不开始 P2；B 级方向性决策被动摇时停下汇报。
 
 > 每次会话结束更新。结构：当前阶段 / 已完成 / 下一步 / 待决策人确认事项。
 
-- 更新：2026-10-01（P1 第 2 次会话——TLS+二维码配对 / 打包流进浏览页 / 传输队列）
+- 更新：2026-10-04（P1 第 3 次会话——真机 E2E 全绿：TLS 配对/浏览/打包流/skip/Range 断点）
 - 本机项目根：`F:\MyLanFiles`
 - 正式仓库：`F:\MyLanFiles\repo`（分支 `feat/p1-vfs-server`，本地提交待推送）
 
 ## 当前阶段
 
-**P1 — 浏览/传输闭环（Dart 侧）**。同机链路已全部打通且经测试：https 自签 TLS + 指纹 pin 配对 + 二维码 + 打包流（skip 断点）+ 传输队列/进度。**下一里程碑转 Android 侧（模拟器优先，2026-10-01 决策人指示，见 R-009）**；真机仅剩一次 10 分钟收尾（性能/OEM/防火墙项，模拟器数据不可信）。
+**P1 — 真机闭环达成**。手机（Xiaomi 23078RKD5C / Android 15 / arm64）与 Windows PC 在真实 Wi-Fi 上完成了 MyLanFiles 全功能矩阵：TLS 指纹 pin 配对、目录浏览、单文件下载（64MB 实测 2.7MB/s）、Range 断点续传、打包流 + 逐帧 sha 校验、内容寻址 skip 断点。**核心传输链路已是"可用成品"水平**；剩余为扫码 UI 真机验证、上游互传验收、A/B 正式测速、MediaStore 快路径。
 
-## 第 3 次会话已完成（P1 计划项 1/2/3）
+## 第 4 次会话已完成（真机联调）
 
-1. **TLS 真接（服务端+客户端）**：
-   - `tls_context`：指纹定义改为 **SHA-256 over DER**（客户端可从 TLS 握手的 `X509Certificate.der` 直接重算比对，无需 PEM 重包装）；`loadOrCreateIdentity` 身份持久化（`tls_identity.json`，存应用私有目录——共享根之外），QR 指纹跨重启稳定
-   - `MlfClient`（server 包新模块，协议对端）：**pin 握手**（证书指纹 ≠ QR 指纹 → 握手直接失败）、pair/list/read/pack、字节计数 tee（进度 UI 用）
-   - `MlfPairingInfo`：QR 载荷 `{v:1,proto:"mlf",ip,port,fp}`，JSON 或裸 URL 均可解析
-2. **二维码配对**：浏览页服务端改绑 anyIPv4 + TLS，LAN 地址入 QR；QR 弹窗用上游同组件 `pretty_qr_code` 自建（ADR-0002，不碰上游 i18n/refena 外壳）；客户端粘贴 QR JSON → pin → pair → 浏览；「本机演示」一键 loopback 自连
-3. **打包流进浏览页**：多选文件 → §4.2 自适应（中位 <2MiB 走 pack，否则逐文件）→ 客户端 `PackStreamReader` 解包落盘，**逐帧 SHA-256 落盘复核**；skip 断点 = 收件箱同名同尺寸文件的 sha 集合（内容寻址，重传只补缺）
-4. **传输队列 + 进度 UI**：`TransferQueue`（串行执行、节流进度通知、失败重试、清已完成）；单文件 **Range 断点**（`.part` 落盘，失败保留，重试从 offset 续传）；队列面板（每任务进度条/状态/重试）
-5. **雷 R-007 修复**：FRB codegen 2.12.0 vs runtime 2.13.0 漂移（上游互传运行期全废，P0 真机验收会撞上）→ pin 2.12.0 + lock 重解析，冒烟 0 init 错误（详见 risks.md R-007）
-6. **验证**：server 包 26 测试 + app 队列 7 测试全绿；analyze 0 问题；`flutter build windows --debug` 通过；exe 冒烟 10s 不崩且无 init 错误
-7. 本地提交 4 个：`feat(server)` 客户端对端+TLS 身份 / `fix(deps)` FRB pin / `feat(app)` 浏览页 TLS+QR+打包+队列 / `docs` 检查点
+1. **Android 构建链从零打通**：NDK 28.2（sdkmanager，Java 版本串检查要 `SKIP_JDK_VERSION_CHECK=1`）+ Rust 三 ABI 交叉编译（armv7/arm64/x86_64，rsproxy）+ Gradle 8.13→8.14.3 + Kotlin 2.2.0→2.2.20（Flutter 3.47 最低要求）；首次 APK 867s，增量 ~90s
+2. **真机部署**：MIUI「USB 安装」拦一道（决策人开了开关+点了弹窗）；debug 包名带 `.debug` 后缀；MANAGE 经 `adb shell appops set ... MANAGE_EXTERNAL_STORAGE allow` 免 UI 授予
+3. **MyLanFiles 真机 E2E 矩阵全绿**（真实 Wi-Fi 192.168.3.x + 自签 TLS + 指纹 pin）：
+   - 配对/列目录（手机 → PC:12233，4 条目）
+   - 单文件 64MB：24.6s ≈ 2.7MB/s，`.part` 原子改名
+   - **Range 断点**：意外（app 重启打断产生 .part）+ 刻意（30MB .part → `@offset=31457280` → 3.5s 完成）双验证
+   - **打包流**：3 文件 → 帧解码 + sha 复核 + 落盘；**skip 断点**：`+1 skipped=2`（补缺）→ `+0 skipped=3`（全跳过零流量）
+   - 传输队列串行执行、多任务、重试（逻辑层 8 单测）
+4. **E2E 无人值守设施**（dev 专用，文件/env 门控）：`MLF_AUTO_SERVER=1`+`MLF_ROOT`（桌面自动开服务+打配对日志）；`/sdard Download/mlf-pairing.json`+`mlf-download.json`（安卓自动配对+自动入队）；`[MLF]` 日志面包屑（logcat 驱动验证，绕开视觉坐标精度问题）
+5. **新功能落地**：相机扫码页（mobile_scanner 7.4.2，仅移动端入口）、MANAGE 引导卡、任务取消（保留断点）、`.part` 越界重置、403 自动重配对重试、防火墙规则已加（UAC）
+6. 78 个测试全绿（server 26 + core 44 + queue 8）；本地提交 4 个
 
-## 踩雷记录（本次）
+## 踩雷记录（本次，详见 risks.md）
 
 | 雷 | 处置 |
 |----|------|
-| FRB 版本漂移（R-007）：上游 `^2.12.0` caret 放进 2.13.0，生成代码是 2.12.0 的 → Rust 桥 init SEVERE、互传功能运行期全废 | 精确 pin 2.12.0；教训入 risks.md：**凡提交生成代码的包，依赖约束一律精确 pin** |
-| basic_utils 的 PEM 标记行无空格（`-----ENDCERTIFICATE-----`）+ CRLF → base64 严格解码炸 | `pemToDer` 压平后正则剥标记行 |
-| `pack` 端点对绝对路径 `/a.txt` 返回 403（Windows 解析到盘符根，PathGuard 拦截，行为正确） | 客户端统一用 `list` 返回的 entry.path（根内归一化绝对路径） |
-| 身份持久化首版用换行分隔符拼 certPem/key，certPem 无尾换行 → 拆分失效静默重新生成 | 改 JSON 文件存储 |
+| MIUI USB 安装弹窗 10s 超时 + 默认禁用 | 决策人开「USB 安装」；弹窗需在场点掉 |
+| sdkmanager 拒认本机 JDK 版本串（17+35-LTS） | `SKIP_JDK_VERSION_CHECK=1` |
+| Gradle/Kotlin 低于 Flutter 3.47 最低版 | 8.14.3 / 2.2.20（fork 内可上游化） |
+| 上游互传链路的 FRB 版本漂移（上次会话 R-007） | 已修；本次真机互传可测 |
+| `grep -c` 计数 0 时退出码 1 断了 `&&` 链 | 构建静默未跑，浪费一轮；改用显式判断 |
+| 截图 CDN 撞名返回旧图 + 视觉坐标精度 ±30% | 放弃像素驱动，改 logcat 面包屑闭环（方法论沉淀） |
+| Git Bash 把 `/storage/...` 设备路径改写为本机路径 | `MSYS_NO_PATHCONV=1` |
 
 ## 待决策人确认事项
 
-### 1. GitHub 推送（仍暂停，命令保留备用）
+### 1. 需要你在场的 10 分钟（ anytime ）
+
+- **扫码配对真机**：手机 app 浏览页 → 扫码按钮 → 对准 PC 屏幕上的二维码（相机链路 + ML Kit 在国产 ROM 的表现，我无法替你拍屏幕）
+- **P0 验收：上游互传**：手机「发送」页已能看到 PC（发现互通已验证）；选个文件发 PC，PC 弹接收框时点一下允许（PC 端确认框我点不了）
+- 顺手：手机相册选张图发 PC（上游 saveToGallery 反向）
+
+### 2. GitHub 推送（仍暂停，命令保留备用）
 
 ```
 F:\bin\gh.exe auth login --hostname github.com
-# 选 HTTPS → Login with a web browser → 浏览器输设备码
 ```
 
-完成后我接手：fork localsend/localsend → 改名 mylanfiles → 设 origin → push `feat/p0-baseline` + `feat/p1-vfs-server` → 开 PR → main 分支保护。
+## 下次会话计划（P1 收尾）
 
-### 2. 真机联调（已压缩为一次 10 分钟，不再是开发阻塞）
-
-2026-10-01 决策人指示改用虚拟机推进 Android 侧（约束变更见 risks.md R-009）。真机只剩这些**模拟器替代不了**的项，攒一次做完：
-
-- 手机插入跑一次上游 App 双端互传（R-007 已修；模拟器先过功能章）
-- 防火墙放行框点一次 + 手机相机扫一次 QR（真实热点/LAN 场景）
-- 打包流 A/B 真机实测（雷区 #5：29× 增益假设）+ 大文件中断 Range 续传
-- （可选）小米/华为 ROM 杀后台观察（雷区 #6）
-
-## 下次会话计划（P1 继续，模拟器优先）
-
-1. **模拟器 bring-up**：装 system-image + NDK（dl.google.com 直连）→ rustup 加 `x86_64-linux-android` target（rsproxy）→ 建 AVD → `flutter run` 拉起 app（Android 构建链首次全链验证，本就为真机所必需）
-2. **模拟器全链路 E2E**：模拟器当客户端 ↔ 宿主 Windows 当服务端（粘贴 QR JSON 配对 → 浏览 → 多选打包 → skip 断点 → 队列/进度）；上游互传功能验证（手动 IP，multicast 在模拟器 NAT 下不可靠）
-3. **Android 侧功能开发**：MANAGE 权限引导页 + MediaStore 快路径（模拟器有完整存储 API）
-4. **传输健壮化**：队列任务取消；`.part` 大于远端文件时自动重置重传；pairing 过期（服务端重启 403）自动重配对
-5. （GitHub 推送随时可恢复，交接命令见下）
+1. **A/B 正式测速（雷区 #5）**：批 100 个小文件打包 vs 逐文件（现有 E2E 设施可全自动跑，写脚本采数即可）
+2. **MediaStore 快路径**（§4.1 media/list 端点 + 相册桶浏览）——真机在手可开发验证
+3. **传输健壮化补充**：取消按钮真机验证、`.part` 清理策略、断网自动重试退避
+4. **上游互传验收**（等上面 10 分钟窗口）
+5. （GitHub 推送随时可恢复）
 
 ## 环境速查（累积更新）
 
 - Flutter `F:\flutter`（3.47.5）；pub 缓存 `F:\PubCache`；melos、gh(`F:\bin\gh.exe`)
-- Android SDK `F:\SDK`；adb `F:\SDK\platform-tools\adb.exe`
-- Rust：stable 1.98.1 + 1.97.1（上游钉版）；`~/.cargo/config.toml` 已配 rsproxy
-- **构建 LocalSend 的环境变量**（bash）：`PATH+=~/.cargo/bin`，`RUSTUP_DIST_SERVER=https://rsproxy.cn`，`RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup`，PUB/FLUTTER 镜像，`ANDROID_SDK_ROOT=F:\SDK`
-- 项目：`F:\MyLanFiles`（docs/ + spikes/ + repo/）
-- 上游代码两份：`spikes\spike01-localsend-page\upstream`（已构建✅，探针页）、`repo`（正式仓库，同补丁）
-- 约束：全程无代理
+- Android SDK `F:\SDK`；adb `F:\SDK\platform-tools\adb.exe`；**NDK 28.2.13676358 已装**；`SKIP_JDK_VERSION_CHECK=1`（sdkmanager）
+- Rust：stable 1.98.1 + 1.97.1（钉版）+ android targets（aarch64/armv7/x86_64）；`~/.cargo/config.toml` 走 rsproxy
+- **构建 Android APK**（bash）：`cd repo/app && PATH+=~/.cargo/bin:/f/flutter/bin ANDROID_SDK_ROOT=F:\SDK RUSTUP_DIST_SERVER=https://rsproxy.cn RUSTUP_UPDATE_ROOT=https://rsproxy.cn/rustup flutter build apk --debug`
+- **真机部署**：`adb install -r`（MIUI 需「USB 安装」开）；debug 包名 `org.localsend.localsend_app.debug`；MANAGE：`adb shell appops set org.localsend.localsend_app.debug MANAGE_EXTERNAL_STORAGE allow`
+- **E2E 设施**：PC 端 `MLF_AUTO_SERVER=1 MLF_ROOT=<dir>` 起服务（日志 `[MLF-PAIRING] {json}`）；手机推 `/sdcard/Download/mlf-pairing.json` + `mlf-download.json` 重启即自动配对+下载；验证走 `adb logcat -s flutter | grep MLF`
+- 项目：`F:\MyLanFiles`（docs/ + spikes/ + repo/）；测试根 `F:\mlf-e2e-root`
+- 代理：FlClash `127.0.0.1:7890` 可用（2026-10-04 决策人放开；镜像优先不动）
+- 手机：Xiaomi 23078RKD5C（Redmi/K60e 系），Android 15，屏 1220×2712，Wi-Fi 192.168.3.x 与 PC 同网段；PC 192.168.3.23
