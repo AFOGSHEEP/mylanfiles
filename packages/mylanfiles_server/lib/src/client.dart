@@ -189,6 +189,105 @@ class MlfClient {
     return PackStreamReader(res.stream);
   }
 
+  /// Raw chunked PUT (§4.1 fs/write). [offset] > 0 resumes the remote file
+  /// at that byte position. Returns the remote size reported by the server.
+  Future<int> write(
+    Uri base,
+    String path,
+    Stream<List<int>> body,
+    int offset,
+  ) async {
+    final req = http.StreamedRequest(
+      'PUT',
+      resolve(base, 'fs/write').replace(
+        queryParameters: {'path': path, 'offset': '$offset'},
+      ),
+    )..headers.addAll(_authHeaders);
+    unawaited(
+      req.sink.addStream(body).then((_) => req.sink.close()),
+    );
+    final res = await _inner.send(req);
+    if (res.statusCode != 200) {
+      await res.stream.drain<void>().catchError((Object _) {});
+      throw MlfClientException('write failed: ${res.statusCode}');
+    }
+    final size =
+        (jsonDecode(await res.stream.bytesToString())
+            as Map<dynamic, dynamic>)['size'] as int;
+    return size;
+  }
+
+  /// Generic fs/op invocation (§4.1): copy|move|delete|rename|mkdir.
+  Future<void> op(Uri base, String op, Map<String, dynamic> args) async {
+    final res = await _inner.send(
+      http.Request('POST', resolve(base, 'fs/op'))
+        ..headers.addAll(_authHeaders)
+        ..headers['content-type'] = 'application/json'
+        ..body = jsonEncode({'op': op, 'args': args}),
+    );
+    if (res.statusCode != 200) {
+      await res.stream.drain<void>().catchError((Object _) {});
+      throw MlfClientException('op $op failed: ${res.statusCode}');
+    }
+  }
+
+  /// Atomic resumable upload of [file] into remote directory [targetDir]
+  /// (virtual path, '/' = root). Streams into `<name>.mlfpart` remotely
+  /// (offset = existing part size → resume), then renames to the final name
+  /// only after the full length is confirmed — a partial upload never
+  /// shadows a complete file. [onProgress] gets (sent, total) updates.
+  Future<void> upload(
+    Uri base,
+    File file,
+    String targetDir, {
+    void Function(int sent, int total)? onProgress,
+  }) async {
+    final name = sanitizeFilename(file.uri.pathSegments.last);
+    final dir = targetDir.endsWith('/') ? targetDir : '$targetDir/';
+    final partPath = '$dir$name.mlfpart';
+
+    // Ensure the target directory exists (mkdir is idempotent server-side).
+    try {
+      await op(base, 'mkdir', {'path': dir, 'recursive': true});
+    } on MlfClientException {
+      // 409 already-exists is fine; anything else surfaces in the upload.
+    }
+
+    // Resume point = whatever the remote already holds.
+    var offset = 0;
+    final total = await file.length();
+    try {
+      final entries = await list(base, dir);
+      for (final e in entries) {
+        if (e.name == '$name.mlfpart') {
+          offset = e.size;
+          break;
+        }
+      }
+    } on MlfClientException {
+      offset = 0; // dir not listable (e.g. missing) — start fresh
+    }
+    if (offset > total) {
+      offset = 0; // remote part longer than the local file — it changed
+    }
+
+    onProgress?.call(offset, total);
+    var sent = offset;
+    final size = await write(
+      base,
+      partPath,
+      countBytes(file.openRead(offset), (d) => onProgress?.call(sent += d, total)),
+      offset,
+    );
+    if (size != total) {
+      throw MlfClientException(
+        'upload incomplete: server reports $size of $total bytes',
+      );
+    }
+    await op(base, 'rename', {'path': partPath, 'newName': name});
+    onProgress?.call(total, total);
+  }
+
   void close() => _inner.close();
 }
 

@@ -18,7 +18,7 @@ TransferMode pickTransferMode(Iterable<int> fileSizes) {
 
 enum TransferState { queued, running, done, failed, canceled }
 
-enum TransferKind { singleFile, pack }
+enum TransferKind { singleFile, pack, upload }
 
 /// Thrown by runners when the user cancels; the queue marks the task
 /// canceled instead of failed (partial data is kept where meaningful).

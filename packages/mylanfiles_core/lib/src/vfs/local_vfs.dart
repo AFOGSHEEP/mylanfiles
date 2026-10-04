@@ -22,6 +22,9 @@ class LocalVfs implements Vfs {
   @override
   Future<List<FsEntry>> list([String path = '/']) async {
     final dir = Directory(_guard.resolve(path));
+    if (!dir.existsSync()) {
+      throw VfsNotFoundException(path);
+    }
     final entities = await dir.list(followLinks: false).toList();
     final entries = <FsEntry>[];
     for (final e in entities) {

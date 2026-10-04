@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 
+import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:localsend_app/pages/mylanfiles/qr_scan_page.dart';
@@ -50,11 +51,15 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   // Android：所有文件访问（MANAGE）授予状态；null = 非 Android 或未查询
   bool? _manageGranted;
 
+  // 上传全部结束后刷新目录列表（配对 _queue 监听）。
+  bool _refreshAfterUploads = false;
+
   final TransferQueue _queue = TransferQueue();
 
   @override
   void initState() {
     super.initState();
+    _queue.addListener(_onQueueChanged);
     if (Platform.isAndroid) {
       _refreshManageStatus();
     }
@@ -105,10 +110,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       final wanted = paths.toSet();
       final wantedNames = paths.map((p) => p.split('/').last).toSet();
       var entries = <FsEntry>[];
-      bool match(FsEntry e) =>
-          wanted.contains(e.path) ||
-          wanted.contains(e.name) ||
-          wantedNames.contains(e.name);
+      bool match(FsEntry e) => wanted.contains(e.path) || wanted.contains(e.name) || wantedNames.contains(e.name);
       for (final e in _entries) {
         if (match(e)) {
           entries.add(e);
@@ -171,6 +173,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
 
   @override
   void dispose() {
+    _queue.removeListener(_onQueueChanged);
     unawaited(_server?.stop());
     _client?.close();
     _queue.dispose();
@@ -579,6 +582,64 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     debugPrint('[MLF] pack done: +$received skipped=${files.length - received}');
   }
 
+  // ---- 上传（PC → 远端 / 手机 → 远端）----
+
+  /// 选本地文件 → 上传到当前浏览目录（远端原子落名 + 断点续传）。
+  Future<void> _pickAndUpload() async {
+    if (_client == null || _remoteBase == null) {
+      return;
+    }
+    final result = await FilePicker.pickFiles(
+      type: FileType.any,
+      allowMultiple: true,
+    );
+    final files = result?.paths.whereType<String>().toList() ?? const [];
+    if (files.isEmpty) {
+      return;
+    }
+    _refreshAfterUploads = true;
+    for (final path in files) {
+      final f = File(path);
+      final size = f.existsSync() ? f.lengthSync() : 0;
+      _queue.enqueue(
+        TransferTask(
+          label: '↑ ${f.uri.pathSegments.last}',
+          kind: TransferKind.upload,
+          totalBytes: size,
+          runner: (task) => _withReauth(() => _runUpload(task, f)),
+        ),
+      );
+    }
+  }
+
+  Future<void> _runUpload(TransferTask task, File file) async {
+    debugPrint('[MLF] upload ${file.path} (${file.lengthSync()}B) -> $_currentPath');
+    await _client!.upload(
+      _remoteBase!,
+      file,
+      _currentPath,
+      onProgress: (sent, total) {
+        _throwIfCanceled(task);
+        final delta = sent - task.receivedBytes;
+        if (delta > 0) {
+          task.addBytes(delta);
+        }
+      },
+    );
+    debugPrint('[MLF] upload done: ${file.uri.pathSegments.last}');
+  }
+
+  void _onQueueChanged() {
+    if (_refreshAfterUploads && !_queue.isBusy && _client != null && _remoteBase != null) {
+      _refreshAfterUploads = false;
+      unawaited(
+        _openDir(_currentPath).catchError((Object e) {
+          debugPrint('[MLF] post-upload refresh failed: $e');
+        }),
+      );
+    }
+  }
+
   /// 多选下载入口：按 §4.2 自适应规则选打包流或逐文件。
   Future<void> _downloadSelected() async {
     final files = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
@@ -773,6 +834,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
             onPressed: _downloadSelected,
             icon: const Icon(Icons.download),
             label: const Text('下载所选'),
+          )
+        else
+          FilledButton.tonalIcon(
+            onPressed: () => unawaited(_pickAndUpload()),
+            icon: const Icon(Icons.upload_file),
+            label: Text('上传到 ${_currentPath == '/' ? '根目录' : '当前目录'}'),
           ),
       ],
     );

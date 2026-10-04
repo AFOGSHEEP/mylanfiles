@@ -132,6 +132,44 @@ void main() {
     await reader2.cancel();
   }, timeout: const Timeout(Duration(minutes: 2)));
 
+  test('upload: lands atomically, resumes from remote part (R-013 paths)', () async {
+    final src = File('${serverRoot.path}/upload-src.bin');
+    src.writeAsBytesSync(List.generate(50000, (i) => i % 251));
+
+    // 1) full upload to /updir/
+    var lastSent = -1;
+    await client.upload(base, src, '/updir', onProgress: (s, t) => lastSent = s);
+    expect(lastSent, 50000);
+    final entries = await client.list(base, '/updir');
+    expect(
+      entries.map((e) => e.name),
+      allOf(contains('upload-src.bin'), isNot(contains('upload-src.bin.mlfpart'))),
+    );
+
+    // 2) simulate an interrupted upload: remote part holding half the bytes
+    await client.op(base, 'delete', {'path': '/updir/upload-src.bin'});
+    final half = File('${serverRoot.path}/half.bin');
+    half.writeAsBytesSync(src.readAsBytesSync().sublist(0, 25000));
+    await client.upload(base, half, '/updir');
+    await client.op(base, 'rename', {
+      'path': '/updir/half.bin',
+      'newName': 'upload-src.bin.mlfpart',
+    });
+
+    // 3) re-upload resumes from 25000 — the wire only carries the tail.
+    var firstProgress = -1;
+    await client.upload(
+      base,
+      src,
+      '/updir',
+      onProgress: (s, t) => firstProgress = firstProgress < 0 ? s : firstProgress,
+    );
+    expect(firstProgress, 25000, reason: 'resume must start at the part size');
+
+    final finalEntries = await client.list(base, '/updir');
+    expect(finalEntries.firstWhere((e) => e.name == 'upload-src.bin').size, 50000);
+  }, timeout: const Timeout(Duration(minutes: 2)));
+
   test('countBytes reports every byte exactly once', () async {
     var counted = 0;
     final src = Stream<List<int>>.fromIterable([
