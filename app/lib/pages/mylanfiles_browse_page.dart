@@ -64,6 +64,62 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         unawaited(_autoStartForE2E());
       });
+    } else if (Platform.isAndroid) {
+      // Android 联调捷径：/sdcard/Download/mlf-pairing.json 存在时自动填入并连接。
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        unawaited(_autoPairFromFile());
+      });
+    }
+  }
+
+  Future<void> _autoPairFromFile() async {
+    try {
+      final f = File('/storage/emulated/0/Download/mlf-pairing.json');
+      if (await f.exists()) {
+        final raw = (await f.readAsString()).trim();
+        debugPrint('[MLF] auto-pair file found (${raw.length} chars)');
+        _addressController.text = raw;
+        await _connect();
+        await _autoDownloadFromFile();
+      }
+    } on Object catch (e) {
+      debugPrint('[MLF] auto-pair file error: $e');
+    }
+  }
+
+  /// E2E：配对后若存在 mlf-download.json（{"paths":[...]}），按路径入队打包下载。
+  Future<void> _autoDownloadFromFile() async {
+    if (_client == null || _remoteBase == null) {
+      return;
+    }
+    try {
+      final f = File('/storage/emulated/0/Download/mlf-download.json');
+      if (!await f.exists()) {
+        return;
+      }
+      final body = jsonDecode(await f.readAsString()) as Map<dynamic, dynamic>;
+      final paths = (body['paths'] as List?)?.cast<String>() ?? const [];
+      if (paths.isEmpty) {
+        return;
+      }
+      final wanted = paths.toSet();
+      final entries = <FsEntry>[];
+      for (final e in _entries) {
+        if (wanted.contains(e.path) || wanted.contains(e.name)) {
+          entries.add(e);
+        }
+      }
+      debugPrint('[MLF] auto-download: ${entries.length}/${paths.length} matched');
+      if (entries.isEmpty) {
+        return;
+      }
+      if (entries.length == 1) {
+        _enqueueDownload(entries.first);
+      } else {
+        await _enqueuePack(entries);
+      }
+    } on Object catch (e) {
+      debugPrint('[MLF] auto-download error: $e');
     }
   }
 
@@ -135,6 +191,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   Future<String> _sharedRoot() async {
     if (Platform.isAndroid && _manageGranted == true) {
       return '/storage/emulated/0';
+    }
+    // E2E: MLF_ROOT 固定共享根（无人值守联调）。
+    final envRoot = Platform.environment['MLF_ROOT'];
+    if (envRoot != null && envRoot.isNotEmpty) {
+      return envRoot;
     }
     final inbox = await _inboxDir();
     return inbox.parent.path;
@@ -256,6 +317,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
 
   Future<void> _connect() async {
     final raw = _addressController.text.trim();
+    debugPrint('[MLF] connect tapped, raw=${raw.isEmpty ? "<empty>" : raw}');
     if (raw.isEmpty) {
       return;
     }
@@ -282,9 +344,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       await client.pair(info.baseUri, _clientFingerprint);
       _client = client;
       _remoteBase = info.baseUri;
+      debugPrint('[MLF] pair ok -> ${info.baseUri}');
       await _listDir('/');
       setState(() {});
     } on Object catch (e) {
+      debugPrint('[MLF] connect FAILED: $e');
       _remoteBase = null;
       setState(() => _error = '连接失败（指纹不匹配或不可达）: $e');
     } finally {
@@ -303,6 +367,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
 
   Future<void> _listDir(String path) async {
     final entries = await _client!.list(_remoteBase!, path);
+    debugPrint('[MLF] list ok: $path (${entries.length} entries)');
     setState(() {
       _entries = entries;
       _currentPath = path;
@@ -365,6 +430,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     final safeName = sanitizeFilename(entry.name);
     final part = File('${inbox.path}/$safeName.part');
     var offset = part.existsSync() ? await part.length() : 0;
+    debugPrint('[MLF] download ${entry.name} @offset=$offset size=${entry.size}');
     if (offset > entry.size) {
       await part.delete();
       offset = 0;
@@ -406,6 +472,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       rethrow;
     }
     await _finalizePart(part, File('${inbox.path}/$safeName'));
+    debugPrint('[MLF] download done: $safeName');
   }
 
   Future<void> _finalizePart(File part, File target) async {
@@ -456,6 +523,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
           break;
         }
         task.setDetail('正在 ${frame.name}');
+        debugPrint('[MLF] frame: ${frame.name} ${frame.size}B');
         final target = File('${inbox.path}/${sanitizeFilename(frame.name)}');
         final sink = target.openWrite();
         var ok = true;
@@ -488,6 +556,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       await reader.cancel();
     }
     task.setDetail('新增 $received 个 · 跳过 ${files.length - received} 个已存在');
+    debugPrint('[MLF] pack done: +$received skipped=${files.length - received}');
   }
 
   /// 多选下载入口：按 §4.2 自适应规则选打包流或逐文件。

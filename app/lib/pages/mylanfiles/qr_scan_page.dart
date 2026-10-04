@@ -35,6 +35,7 @@ class _MlfQrScanPageState extends State<MlfQrScanPage> {
       return;
     }
     _popped = true;
+    debugPrint('[MLF] qr detected: $value');
     unawaited(_controller.stop());
     Navigator.of(context).pop(value);
   }

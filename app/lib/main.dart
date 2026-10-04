@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'dart:io' show File, Platform;
 import 'package:localsend_app/config/init.dart';
 import 'package:localsend_app/config/init_error.dart';
 import 'package:localsend_app/config/theme.dart';
 import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/model/persistence/color_mode.dart';
 import 'package:localsend_app/pages/home_page.dart';
+import 'package:localsend_app/pages/mylanfiles_browse_page.dart';
 import 'package:localsend_app/provider/local_ip_provider.dart';
 import 'package:localsend_app/provider/network/server/server_provider.dart';
 import 'package:localsend_app/provider/settings_provider.dart';
@@ -40,6 +42,22 @@ Future<void> main(List<String> args) async {
       ),
     ),
   );
+
+  // MyLanFiles dev/E2E: MLF_AUTO_SERVER=1 (desktop) or an Android pairing
+  // file at /sdcard/Download/mlf-pairing.json auto-opens the browse page,
+  // which then auto-starts the server (env path) / auto-connects (file path)
+  // and logs machine-readable [MLF] lines. No effect otherwise.
+  final mlfAuto =
+      Platform.environment['MLF_AUTO_SERVER'] == '1' ||
+      (Platform.isAndroid &&
+          File('/storage/emulated/0/Download/mlf-pairing.json').existsSync());
+  if (mlfAuto) {
+    Future<void>.delayed(const Duration(seconds: 2), () {
+      Routerino.navigatorKey.currentState?.context.push(
+        () => const MyLanFilesBrowsePage(),
+      );
+    });
+  }
 }
 
 class LocalSendApp extends StatelessWidget {
