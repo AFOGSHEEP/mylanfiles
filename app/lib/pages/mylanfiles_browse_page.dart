@@ -103,18 +103,38 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         return;
       }
       final wanted = paths.toSet();
-      final entries = <FsEntry>[];
+      final wantedNames = paths.map((p) => p.split('/').last).toSet();
+      var entries = <FsEntry>[];
+      bool match(FsEntry e) =>
+          wanted.contains(e.path) ||
+          wanted.contains(e.name) ||
+          wantedNames.contains(e.name);
       for (final e in _entries) {
-        if (wanted.contains(e.path) || wanted.contains(e.name)) {
+        if (match(e)) {
           entries.add(e);
+        }
+      }
+      // 路径在子目录时：进入父目录再列一次匹配。
+      if (entries.isEmpty && paths.first.contains('/')) {
+        final parent = paths.first.substring(0, paths.first.lastIndexOf('/'));
+        final dirEntries = await _client!.list(_remoteBase!, parent);
+        debugPrint('[MLF] auto-download: listed parent $parent (${dirEntries.length})');
+        for (final e in dirEntries) {
+          if (match(e)) {
+            entries.add(e);
+          }
         }
       }
       debugPrint('[MLF] auto-download: ${entries.length}/${paths.length} matched');
       if (entries.isEmpty) {
         return;
       }
-      if (entries.length == 1) {
-        _enqueueDownload(entries.first);
+      final mode = body['mode'] as String? ?? 'auto';
+      debugPrint('[MLF] auto-download mode: $mode');
+      if (entries.length == 1 || mode == 'sequential') {
+        for (final e in entries) {
+          _enqueueDownload(e);
+        }
       } else {
         await _enqueuePack(entries);
       }
