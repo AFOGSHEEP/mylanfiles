@@ -50,7 +50,8 @@ Future<void> main(List<String> args) async {
   final mlfAuto =
       Platform.environment['MLF_AUTO_SERVER'] == '1' ||
       (Platform.isAndroid &&
-          File('/storage/emulated/0/Download/mlf-pairing.json').existsSync());
+          (File('/storage/emulated/0/Download/mlf-pairing.json').existsSync() ||
+              File('/storage/emulated/0/Download/mlf-server.flag').existsSync()));
   if (mlfAuto) {
     Future<void>.delayed(const Duration(seconds: 2), () {
       Routerino.navigatorKey.currentState?.context.push(

@@ -82,7 +82,8 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         }
       });
     } else {
-      // 桌面联调捷径：MLF_PAIR_FILE 指向配对 JSON → 自动连接（反向场景用）。
+      // 桌面联调捷径：MLF_PAIR_FILE 指向配对 JSON → 自动连接（反向场景用），
+      // 随后 MLF_DL_FILE / MLF_UL_FILE 触发无人值守传输。
       final pairFile = Platform.environment['MLF_PAIR_FILE'];
       if (pairFile != null && pairFile.isNotEmpty) {
         WidgetsBinding.instance.addPostFrameCallback((_) async {
@@ -91,10 +92,54 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
             debugPrint('[MLF] pair-file loaded (${raw.length} chars)');
             _addressController.text = raw;
             await _connect();
+            await _runDesktopManifests();
           } on Object catch (e) {
             debugPrint('[MLF] pair-file error: $e');
           }
         });
+      }
+    }
+  }
+
+  /// 执行桌面 E2E 清单：MLF_DL_FILE={"paths":[...],"mode":...} 下载；
+  /// MLF_UL_FILE={"files":[本地路径...],"targetDir":"/x"} 上传。
+  Future<void> _runDesktopManifests() async {
+    if (_client == null || _remoteBase == null) {
+      return;
+    }
+    final dl = Platform.environment['MLF_DL_FILE'];
+    if (dl != null && File(dl).existsSync()) {
+      try {
+        final body = jsonDecode(File(dl).readAsStringSync()) as Map<dynamic, dynamic>;
+        await _executeDownloadManifest(body);
+      } on Object catch (e) {
+        debugPrint('[MLF] dl-manifest error: ' + e.toString());
+      }
+    }
+    final ul = Platform.environment['MLF_UL_FILE'];
+    if (ul != null && File(ul).existsSync()) {
+      try {
+        final body = jsonDecode(File(ul).readAsStringSync()) as Map<dynamic, dynamic>;
+        final files = (body['files'] as List?)?.cast<String>() ?? const [];
+        final target = body['targetDir'] as String? ?? '/';
+        _refreshAfterUploads = true;
+        for (final path in files) {
+          final f = File(path);
+          if (!f.existsSync()) {
+            continue;
+          }
+          _queue.enqueue(
+            TransferTask(
+              label: '↑ ' + f.uri.pathSegments.last,
+              kind: TransferKind.upload,
+              totalBytes: f.lengthSync(),
+              runner: (task) => _withReauth(() => _runUpload(task, f)),
+            ),
+          );
+        }
+        debugPrint('[MLF] ul-manifest: ' + files.length.toString() + ' files -> ' + target);
+      } on Object catch (e) {
+        debugPrint('[MLF] ul-manifest error: ' + e.toString());
       }
     }
   }
@@ -125,45 +170,54 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         return;
       }
       final body = jsonDecode(await f.readAsString()) as Map<dynamic, dynamic>;
-      final paths = (body['paths'] as List?)?.cast<String>() ?? const [];
-      if (paths.isEmpty) {
-        return;
+      await _executeDownloadManifest(body);
+    } on Object catch (e) {
+      debugPrint('[MLF] auto-download error: $e');
+    }
+  }
+
+  /// 下载清单执行器（Android 文件 / 桌面 env 两条 E2E 路径共用）。
+  /// manifest: {"paths":[...], "mode": "auto"|"sequential"|"pack"}
+  Future<void> _executeDownloadManifest(Map<dynamic, dynamic> body) async {
+    if (_client == null || _remoteBase == null) {
+      return;
+    }
+    final paths = (body['paths'] as List?)?.cast<String>() ?? const [];
+    if (paths.isEmpty) {
+      return;
+    }
+    final wanted = paths.toSet();
+    final wantedNames = paths.map((p) => p.split('/').last).toSet();
+    var entries = <FsEntry>[];
+    bool match(FsEntry e) => wanted.contains(e.path) || wanted.contains(e.name) || wantedNames.contains(e.name);
+    for (final e in _entries) {
+      if (match(e)) {
+        entries.add(e);
       }
-      final wanted = paths.toSet();
-      final wantedNames = paths.map((p) => p.split('/').last).toSet();
-      var entries = <FsEntry>[];
-      bool match(FsEntry e) => wanted.contains(e.path) || wanted.contains(e.name) || wantedNames.contains(e.name);
-      for (final e in _entries) {
+    }
+    // 路径在子目录时：进入父目录再列一次匹配。
+    if (entries.isEmpty && paths.first.contains('/')) {
+      final parent = paths.first.substring(0, paths.first.lastIndexOf('/'));
+      final dirEntries = await _client!.list(_remoteBase!, parent);
+      debugPrint('[MLF] auto-download: listed parent $parent (${dirEntries.length})');
+      for (final e in dirEntries) {
         if (match(e)) {
           entries.add(e);
         }
       }
-      // 路径在子目录时：进入父目录再列一次匹配。
-      if (entries.isEmpty && paths.first.contains('/')) {
-        final parent = paths.first.substring(0, paths.first.lastIndexOf('/'));
-        final dirEntries = await _client!.list(_remoteBase!, parent);
-        debugPrint('[MLF] auto-download: listed parent $parent (${dirEntries.length})');
-        for (final e in dirEntries) {
-          if (match(e)) {
-            entries.add(e);
-          }
-        }
+    }
+    debugPrint('[MLF] auto-download: ${entries.length}/${paths.length} matched');
+    if (entries.isEmpty) {
+      return;
+    }
+    final mode = body['mode'] as String? ?? 'auto';
+    debugPrint('[MLF] auto-download mode: $mode');
+    if (entries.length == 1 || mode == 'sequential') {
+      for (final e in entries) {
+        _enqueueDownload(e);
       }
-      debugPrint('[MLF] auto-download: ${entries.length}/${paths.length} matched');
-      if (entries.isEmpty) {
-        return;
-      }
-      final mode = body['mode'] as String? ?? 'auto';
-      debugPrint('[MLF] auto-download mode: $mode');
-      if (entries.length == 1 || mode == 'sequential') {
-        for (final e in entries) {
-          _enqueueDownload(e);
-        }
-      } else {
-        await _enqueuePack(entries);
-      }
-    } on Object catch (e) {
-      debugPrint('[MLF] auto-download error: $e');
+    } else {
+      await _enqueuePack(entries);
     }
   }
 
