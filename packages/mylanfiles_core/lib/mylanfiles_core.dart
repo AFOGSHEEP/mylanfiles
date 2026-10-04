@@ -3,6 +3,7 @@
 /// Pure Dart. See docs/adr/0002 for the package layout decision.
 library;
 
+export 'src/discovery.dart';
 export 'src/filename_sanitize.dart';
 export 'src/model/fs_entry.dart';
 export 'src/pack/pack_frames.dart';

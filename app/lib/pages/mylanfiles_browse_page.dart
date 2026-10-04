@@ -62,6 +62,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   // 视图模式：文件列表 / 相册网格。
   bool _photosMode = false;
 
+  // 自动发现：本机服务运行时宣告；浏览页打开时监听附近设备。
+  DiscoveryAnnouncer? _announcer;
+  DiscoveryListener? _listener;
+  List<DiscoveredServer> _discovered = [];
+
   /// 当前 pin 的对端指纹（从地址栏解析出的配对信息）。
   String? _pinnedFp;
 
@@ -78,6 +83,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     // （无人值守 E2E 用；不影响正常启动路径）。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       unawaited(_loadRememberedServers().then((_) => _autoConnectLastUsed()));
+      unawaited(_startDiscoveryListener());
     });
     if (Platform.environment['MLF_AUTO_SERVER'] == '1') {
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -269,6 +275,8 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   @override
   void dispose() {
     _queue.removeListener(_onQueueChanged);
+    unawaited(_listener?.stop());
+    unawaited(_announcer?.stop());
     unawaited(_server?.stop());
     _client?.close();
     _queue.dispose();
@@ -438,6 +446,8 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     });
     try {
       if (_server != null) {
+        await _announcer?.stop();
+        _announcer = null;
         await _server!.stop();
         _server = null;
         setState(() {});
@@ -493,6 +503,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         ),
       );
       debugPrint('[MLF] server up: $_lanIp:${server.port} root=$_rootPath');
+      _startAnnouncer();
       setState(() {});
     } on Object catch (e) {
       setState(() => _error = '服务启动失败: $e');
@@ -573,6 +584,42 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         ],
       ),
     );
+  }
+
+  // ---- 自动发现（UDP 广播宣告/监听，大众化第一入口）----
+
+  Future<void> _startDiscoveryListener() async {
+    if (_listener != null) {
+      return;
+    }
+    final listener = DiscoveryListener(
+      onChanged: (servers) {
+        if (mounted) {
+          setState(() => _discovered = servers);
+        }
+      },
+    );
+    try {
+      await listener.start();
+      _listener = listener;
+      debugPrint('[MLF] discovery listener up');
+    } on Object catch (e) {
+      debugPrint('[MLF] discovery listener failed: ' + e.toString());
+    }
+  }
+
+  void _startAnnouncer() {
+    if (_server == null || _identity == null || _announcer != null) {
+      return;
+    }
+    final announcer = DiscoveryAnnouncer(
+      alias: _deviceAlias(),
+      port: _server!.port,
+      fingerprint: _identity!.fingerprint,
+    );
+    unawaited(announcer.start());
+    _announcer = announcer;
+    debugPrint('[MLF] announcing as ${_deviceAlias()}:${_server!.port}');
   }
 
   // ---- 远程连接（指纹 pin 握手）----
@@ -701,6 +748,55 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     );
   }
 
+  /// 并行分块下载(Mathis 单流瓶颈 → 4 流叠加):仅全新下载且 ≥8MB 时启用。
+  /// 任一块失败即删 `.part` 整体重来(并行写入存在洞,不保留断点);
+  /// 串行路径保持原断点语义。
+  static const _parallelChunks = 4;
+  static const _parallelThreshold = 8 << 20;
+
+  Future<void> _runParallelDownload(
+    TransferTask task,
+    FsEntry entry,
+    File part,
+  ) async {
+    final size = entry.size;
+    final raf = await part.open(mode: FileMode.write);
+    await raf.truncate(size); // 预分配,块到位即偏移写入
+    final chunk = (size + _parallelChunks - 1) ~/ _parallelChunks;
+    final futures = <Future<void>>[];
+    for (var i = 0; i < _parallelChunks; i++) {
+      final start = i * chunk;
+      final len = (i == _parallelChunks - 1) ? size - start : chunk;
+      if (len <= 0) {
+        break;
+      }
+      futures.add(() async {
+        final res = await _client!.read(
+          _remoteBase!,
+          entry.path,
+          offset: start,
+          length: len,
+        );
+        var pos = start;
+        await for (final data in res.stream) {
+          _throwIfCanceled(task);
+          task.addBytes(data.length);
+          await raf.writeFrom(data, pos);
+          pos += data.length;
+        }
+        if (pos != start + len) {
+          throw MlfClientException('chunk $i short: ' + (pos - start).toString() + '/' + len.toString());
+        }
+      }());
+    }
+    try {
+      await Future.wait(futures);
+      await raf.flush();
+    } finally {
+      await raf.close();
+    }
+  }
+
   /// 逐文件下载，Range 断点续传：`.part` 落盘，失败保留，重试从
   /// offset=part 长度继续（§4.1 fs/read offset）。成功后原子改名。
   /// 远端文件比本地 .part 小（远端已变化）时丢弃 .part 从头重传。
@@ -710,6 +806,24 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     final part = File('${inbox.path}/$safeName.part');
     var offset = part.existsSync() ? await part.length() : 0;
     debugPrint('[MLF] download ${entry.name} @offset=$offset size=${entry.size}');
+    // 大文件全新下载走 4 路并行(真机基线:单流 2.7MB/s)。
+    if (offset == 0 && entry.size >= _parallelThreshold && _client != null && _remoteBase != null) {
+      final t0 = DateTime.now();
+      try {
+        await _runParallelDownload(task, entry, part);
+      } on Object {
+        if (part.existsSync()) {
+          await part.delete(); // 并行半成品含洞,不保留断点
+        }
+        rethrow;
+      }
+      debugPrint(
+        '[MLF] parallel done: ' + entry.name + ' in ' + DateTime.now().difference(t0).inMilliseconds.toString() + 'ms',
+      );
+      await _finalizePart(part, File('${inbox.path}/$safeName'));
+      debugPrint('[MLF] download done: $safeName');
+      return;
+    }
     if (offset > entry.size) {
       await part.delete();
       offset = 0;
@@ -1084,7 +1198,50 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   }
 
   Widget _buildServerChips() {
-    if (_servers.isEmpty || _remoteBase != null) {
+    if (_remoteBase != null) {
+      return const SizedBox.shrink();
+    }
+    // 附近新发现的设备(不在记忆列表中的)优先展示——零操作即连。
+    final knownFps = _servers.map((s) => s.fp).toSet();
+    final fresh = _discovered.where((d) => !knownFps.contains(d.fingerprint)).toList();
+    if (fresh.isNotEmpty) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '附近设备',
+              style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                color: Theme.of(context).colorScheme.primary,
+              ),
+            ),
+          ),
+          SizedBox(
+            height: 40,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              itemCount: fresh.length,
+              separatorBuilder: (_, _) => const SizedBox(width: 8),
+              itemBuilder: (context, i) {
+                final d = fresh[i];
+                return ActionChip(
+                  avatar: const Icon(Icons.wifi_tethering, size: 18),
+                  label: Text(d.alias.isEmpty ? d.ip : d.alias),
+                  onPressed: () {
+                    debugPrint('[MLF] connect to discovered: ' + d.alias + ' @' + d.ip);
+                    _addressController.text = d.pairingJson;
+                    unawaited(_connect());
+                  },
+                );
+              },
+            ),
+          ),
+          if (_servers.isNotEmpty) const SizedBox(height: 4),
+        ],
+      );
+    }
+    if (_servers.isEmpty) {
       return const SizedBox.shrink();
     }
     return SizedBox(

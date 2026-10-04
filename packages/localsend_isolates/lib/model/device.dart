@@ -66,8 +66,7 @@ class DeviceLog {
 
 enum TransmissionMethod {
   http('HTTP'),
-  webrtc('WebRTC')
-  ;
+  webrtc('WebRTC');
 
   final String label;
 

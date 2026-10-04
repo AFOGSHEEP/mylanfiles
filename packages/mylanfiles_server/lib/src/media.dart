@@ -1,4 +1,5 @@
 import 'dart:io';
+import 'dart:isolate';
 import 'dart:math';
 import 'dart:typed_data';
 import 'dart:convert' show utf8;
@@ -336,12 +337,18 @@ class ThumbService {
     final data = await _vfs
         .read(path)
         .fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
-    img.Image? decoded;
+    // 解码/缩放/编码是 CPU 密集路径：放 isolate，避免阻塞服务端事件循环
+    // （真机基线：同步解码时 2 并发预取把整个 server 卡成串行）。
     try {
-      decoded = img.decodeImage(Uint8List.fromList(data));
+      final bytes = Uint8List.fromList(data);
+      return await Isolate.run(() => _decodeResizeSync(bytes, size));
     } on Object {
       return null;
     }
+  }
+
+  static Uint8List? _decodeResizeSync(Uint8List data, int size) {
+    final decoded = img.decodeImage(data);
     if (decoded == null) {
       return null; // HEIC 等暂不支持:客户端显示占位
     }
