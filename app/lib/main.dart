@@ -49,6 +49,8 @@ Future<void> main(List<String> args) async {
   // and logs machine-readable [MLF] lines. No effect otherwise.
   final mlfAuto =
       Platform.environment['MLF_AUTO_SERVER'] == '1' ||
+      (!Platform.isAndroid &&
+          Platform.environment['MLF_PAIR_FILE']?.isNotEmpty == true) ||
       (Platform.isAndroid &&
           (File('/storage/emulated/0/Download/mlf-pairing.json').existsSync() ||
               File('/storage/emulated/0/Download/mlf-server.flag').existsSync()));

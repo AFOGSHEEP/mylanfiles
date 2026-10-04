@@ -121,7 +121,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       try {
         final body = jsonDecode(File(ul).readAsStringSync()) as Map<dynamic, dynamic>;
         final files = (body['files'] as List?)?.cast<String>() ?? const [];
-        final target = body['targetDir'] as String? ?? '/';
+        final target = body['targetDir'] as String? ?? _currentPath;
         _refreshAfterUploads = true;
         for (final path in files) {
           final f = File(path);
@@ -133,7 +133,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               label: '↑ ' + f.uri.pathSegments.last,
               kind: TransferKind.upload,
               totalBytes: f.lengthSync(),
-              runner: (task) => _withReauth(() => _runUpload(task, f)),
+              runner: (task) => _withReauth(() => _runUpload(task, f, target)),
             ),
           );
         }
@@ -224,6 +224,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   Future<void> _autoStartForE2E() async {
     if (_server != null) {
       return;
+    }
+    if (Platform.isAndroid) {
+      // 先等权限状态就绪再定共享根:否则 _sharedRoot 在 MANAGE 未查完时
+      // 落到应用私有目录(真机反向 E2E 轮发现的竞态)。
+      await _refreshManageStatus();
     }
     await _toggleServer();
     if (_server == null || _identity == null) {
@@ -688,12 +693,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
   }
 
-  Future<void> _runUpload(TransferTask task, File file) async {
-    debugPrint('[MLF] upload ${file.path} (${file.lengthSync()}B) -> $_currentPath');
+  Future<void> _runUpload(TransferTask task, File file, [String? targetDir]) async {
+    final target = targetDir ?? _currentPath;
+    debugPrint('[MLF] upload ${file.path} (${file.lengthSync()}B) -> $target');
     await _client!.upload(
       _remoteBase!,
       file,
-      _currentPath,
+      target,
       onProgress: (sent, total) {
         _throwIfCanceled(task);
         final delta = sent - task.receivedBytes;
