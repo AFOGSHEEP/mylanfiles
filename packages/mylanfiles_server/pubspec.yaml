@@ -12,6 +12,7 @@ dependencies:
   basic_utils: ^5.7.0
   crypto: ^3.0.0
   http: ^1.2.0
+  image: ^4.5.0
   shelf: ^1.4.0
   shelf_router: ^1.1.0
 dev_dependencies:

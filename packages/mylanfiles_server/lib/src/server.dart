@@ -26,20 +26,47 @@ const _fingerprintHeader = 'x-mlf-fingerprint';
 /// paired fingerprint; unpaired requests are rejected before touching the
 /// VFS (§7-3) and rate-limited per IP.
 class MlfServer {
-  MlfServer({
+  /// Factory: media 与 thumb 默认必须共享同一个 ThumbService 实例
+  /// (media 签发的 token 由 thumb 渲染——两个实例 token 不互通)。
+  factory MlfServer({
     required Vfs vfs,
     required String serverFingerprint,
     Set<String> pairedFingerprints = const {},
     bool allowPairing = true,
     RateLimiter? rateLimiter,
     MediaService? media,
-    this.onPaired,
+    ThumbService? thumb,
+    void Function(String fingerprint)? onPaired,
+  }) {
+    final effectiveThumb = thumb ?? ThumbService(vfs);
+    return MlfServer._(
+      vfs: vfs,
+      serverFingerprint: serverFingerprint,
+      paired: {...pairedFingerprints},
+      allowPairing: allowPairing,
+      rateLimiter: rateLimiter ?? RateLimiter(),
+      media: media ?? MediaService(vfs, thumb: effectiveThumb),
+      thumb: effectiveThumb,
+      onPaired: onPaired,
+    );
+  }
+
+  MlfServer._({
+    required Vfs vfs,
+    required String serverFingerprint,
+    required Set<String> paired,
+    required bool allowPairing,
+    required RateLimiter rateLimiter,
+    required MediaService media,
+    required ThumbService thumb,
+    required this.onPaired,
   }) : _vfs = vfs,
        _serverFingerprint = serverFingerprint,
-       _paired = {...pairedFingerprints},
+       _paired = paired,
        _allowPairing = allowPairing,
-       _rateLimiter = rateLimiter ?? RateLimiter(),
-       _media = media ?? MediaService(vfs),
+       _rateLimiter = rateLimiter,
+       _media = media,
+       _thumb = thumb,
        _pairLimiter = RateLimiter(
          maxFailures: 5,
          window: const Duration(minutes: 1),
@@ -47,6 +74,7 @@ class MlfServer {
 
   final Vfs _vfs;
   final MediaService _media;
+  final ThumbService _thumb;
 
   /// Fires after each successful pairing (host app persists the table).
   final void Function(String fingerprint)? onPaired;
@@ -77,7 +105,8 @@ class MlfServer {
       ..put('/api/v1/fs/write', _write)
       ..post('/api/v1/fs/op', _op)
       ..post('/api/v1/pack', _pack)
-      ..get('/api/v1/media/list', _mediaList);
+      ..get('/api/v1/media/list', _mediaList)
+      ..get('/api/v1/thumb', _thumbEndpoint);
     return const Pipeline().addMiddleware(_auth()).addHandler(router.call);
   }
 
@@ -414,6 +443,31 @@ class MlfServer {
       return Response.ok(jsonEncode(result), headers: _jsonHeaders);
     } on MediaBucketNotFoundException {
       return _notFound();
+    } on PathAccessException {
+      return _forbidden();
+    }
+  }
+
+  /// GET /api/v1/thumb?token=&size= — token 由 media/list 签发(防路径枚举)。
+  Future<Response> _thumbEndpoint(Request req) async {
+    final params = req.url.queryParameters;
+    final token = params['token'];
+    final size = int.tryParse(params['size'] ?? '320') ?? 320;
+    if (token == null || token.isEmpty) {
+      return Response(400, body: jsonEncode({'error': 'token required'}));
+    }
+    try {
+      final rendered = await _thumb.render(token, size);
+      if (rendered == null) {
+        return _notFound();
+      }
+      return Response.ok(
+        rendered.$1,
+        headers: {
+          'content-type': 'image/jpeg',
+          'cache-control': 'private, max-age=3600',
+        },
+      );
     } on PathAccessException {
       return _forbidden();
     }

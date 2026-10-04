@@ -1,3 +1,10 @@
+import 'dart:io';
+import 'dart:math';
+import 'dart:typed_data';
+import 'dart:convert' show utf8;
+
+import 'package:crypto/crypto.dart' as crypto;
+import 'package:image/image.dart' as img;
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 
 /// 相册/媒体快路径(交接文档 §4.1 media/list)。
@@ -6,9 +13,12 @@ import 'package:mylanfiles_core/mylanfiles_core.dart';
 /// Music/Download)聚合并按类型过滤、mtime 倒序分页——纯 Dart、跨平台、
 /// 对 VFS 透明。原生 MediaStore 查询通道待真机性能数据再评估(risks.md)。
 class MediaService {
-  MediaService(this._vfs);
+  MediaService(this._vfs, {ThumbService? thumb}) : _thumb = thumb;
 
   final Vfs _vfs;
+
+  /// 可选：给 image/video 条目签发缩略图 token（§4.1，防路径枚举）。
+  final ThumbService? _thumb;
 
   static const knownBuckets = [
     'DCIM',
@@ -105,11 +115,14 @@ class MediaService {
     );
 
     final total = media.length;
-    final page = media
-        .skip(offset)
-        .take(limit)
-        .map((e) => e.toMap()..['kind'] = _kindOf(e.name))
-        .toList();
+    final page = media.skip(offset).take(limit).map((e) {
+      final m = e.toMap()..['kind'] = _kindOf(e.name);
+      final kind = m['kind'] as String;
+      if ((kind == 'image' || kind == 'video') && _thumb != null) {
+        m['thumb'] = _thumb!.issueToken(e.path);
+      }
+      return m;
+    }).toList();
     return {
       'bucket': bucketEntry.name,
       'path': bucketEntry.path,
@@ -177,4 +190,119 @@ class MediaBucketNotFoundException implements Exception {
 
   @override
   String toString() => 'MediaBucketNotFoundException: $bucket';
+}
+
+// ---- 缩略图(§4.1 /thumb):token 由列表/相册结果签发,防路径枚举 ----
+
+/// 缩略图签发与渲染。
+///
+/// token 是服务端随机签发的一次性映射(会话内有效,LRU 上限),客户端无法
+/// 从 token 构造或猜测路径——路径枚举被结构性排除。渲染结果按
+/// (源 mtime, size) 落磁盘缓存,重开即命中。
+class ThumbService {
+  ThumbService(
+    this._vfs, {
+    this.cacheDir,
+    this.maxTokens = 2000,
+    this.maxSourceBytes = 30 << 20,
+  });
+
+  final Vfs _vfs;
+
+  /// 磁盘缓存目录;null = 只在内存缓存(测试用)。
+  final Directory? cacheDir;
+  final int maxTokens;
+  final int maxSourceBytes;
+
+  final Map<String, String> _tokenToPath = {};
+  final _rng = Random.secure();
+
+  static const _sizes = {160, 320, 640};
+
+  /// 为 [path] 签发缩略图 token(同路径重复签发返回同 token)。
+  String issueToken(String path) {
+    final existing = _tokenToPath.entries
+        .where((e) => e.value == path)
+        .map((e) => e.key)
+        .firstOrNull;
+    if (existing != null) {
+      return existing;
+    }
+    if (_tokenToPath.length >= maxTokens) {
+      _tokenToPath.remove(_tokenToPath.keys.first); // LRU 粗粒度驱逐
+    }
+    final token = List.generate(16, (_) => _rng.nextInt(256)).join();
+    _tokenToPath[token] = path;
+    return token;
+  }
+
+  /// 渲染缩略图。返回 (bytes, mime);找不到/不支持返回 null。
+  Future<(Uint8List, String)?> render(String token, int size) async {
+    final path = _tokenToPath[token];
+    if (path == null) {
+      return null;
+    }
+    final s = _sizes.contains(size) ? size : 320;
+
+    // 磁盘缓存:mtime+size 变则失效。
+    FsEntry st;
+    try {
+      st = await _vfs.stat(path);
+    } on Object {
+      return null;
+    }
+    if (st.isDir || st.size > maxSourceBytes) {
+      return null;
+    }
+    if (cacheDir != null) {
+      final key = crypto.sha256
+          .convert(
+            utf8.encode(
+              '$path|${st.mtime?.millisecondsSinceEpoch}|${st.size}|$s',
+            ),
+          )
+          .toString();
+      final cached = File('${cacheDir!.path}/$key.jpg');
+      if (await cached.exists()) {
+        return (await cached.readAsBytes(), 'image/jpeg');
+      }
+      final rendered = await _decodeResize(path, s);
+      if (rendered != null) {
+        try {
+          if (!cacheDir!.existsSync()) {
+            cacheDir!.createSync(recursive: true);
+          }
+          await cached.writeAsBytes(rendered, flush: true);
+        } on Object {
+          /* 缓存写失败不致命 */
+        }
+        return (rendered, 'image/jpeg');
+      }
+      return null;
+    }
+    final rendered = await _decodeResize(path, s);
+    return rendered == null ? null : (rendered, 'image/jpeg');
+  }
+
+  Future<Uint8List?> _decodeResize(String path, int size) async {
+    final data = await _vfs
+        .read(path)
+        .fold<List<int>>(<int>[], (acc, chunk) => acc..addAll(chunk));
+    img.Image? decoded;
+    try {
+      decoded = img.decodeImage(Uint8List.fromList(data));
+    } on Object {
+      return null;
+    }
+    if (decoded == null) {
+      return null; // HEIC 等暂不支持:客户端显示占位
+    }
+    final thumb = img.copyResize(
+      decoded,
+      width: size,
+      height: size,
+      maintainAspect: true,
+    );
+    return Uint8List.fromList(img.encodeJpg(thumb, quality: 78));
+  }
 }

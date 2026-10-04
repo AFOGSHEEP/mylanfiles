@@ -42,7 +42,12 @@ class MlfPairingInfo {
     if (uri.host.isEmpty || uri.port == 0) {
       throw FormatException('not a pairing QR or URL: $raw');
     }
-    return MlfPairingInfo(ip: uri.host, port: uri.port, fingerprint: '', alias: null);
+    return MlfPairingInfo(
+      ip: uri.host,
+      port: uri.port,
+      fingerprint: '',
+      alias: null,
+    );
   }
 
   final String ip;
@@ -193,6 +198,21 @@ class MlfClient {
       throw MlfClientException('pack failed: ${res.statusCode}');
     }
     return PackStreamReader(res.stream);
+  }
+
+  /// 缩略图字节(§4.1 /thumb;token 来自 media/list 条目)。
+  Future<Uint8List> thumb(Uri base, String token, {int size = 320}) async {
+    final res = await _inner.get(
+      resolve(
+        base,
+        'thumb',
+      ).replace(queryParameters: {'token': token, 'size': '$size'}),
+      headers: _authHeaders,
+    );
+    if (res.statusCode != 200) {
+      throw MlfClientException('thumb failed: ${res.statusCode}');
+    }
+    return res.bodyBytes;
   }
 
   /// GET any §4.1 endpoint and parse the JSON body (tests/tools helper).

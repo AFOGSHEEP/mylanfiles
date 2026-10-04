@@ -1,5 +1,6 @@
 import 'dart:io';
 
+import 'package:image/image.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:mylanfiles_server/mylanfiles_server.dart';
 import 'package:test/test.dart';
@@ -118,6 +119,57 @@ void main() {
     expect(page['total'], 3); // 不分类型:2 jpg + 1 mp4
     expect((page['entries'] as List).length, 1);
   });
+
+  test(
+    'thumb: media/list issues tokens; issued token renders JPEG; forged 404',
+    () async {
+      // 真图:用 image 包生成 64x64 PNG 放进 Pictures。
+      final img0 = Image(width: 64, height: 64);
+      for (var y = 0; y < 64; y++) {
+        for (var x = 0; x < 64; x++) {
+          img0.setPixelRgba(x, y, 0x33, 0x66, 0xAA, 0xFF);
+        }
+      }
+      File('${root.path}/Pictures/real.png').writeAsBytesSync(encodePng(img0));
+
+      final res = await _client!.getJson(
+        base,
+        'media/list?bucket=Pictures&type=image',
+      );
+      final entries = (res['entries'] as List).cast<Map<dynamic, dynamic>>();
+      final real = entries.firstWhere((e) => e['name'] == 'real.png');
+      expect(
+        real['thumb'],
+        isA<String>(),
+        reason: 'image entries carry a token',
+      );
+
+      final bytes = await _client!.thumb(
+        base,
+        real['thumb'] as String,
+        size: 160,
+      );
+      expect(bytes.lengthInBytes, greaterThan(100));
+      expect(bytes[0], 0xFF, reason: 'JPEG magic'); // FF D8
+      expect(bytes[1], 0xD8);
+
+      // 伪造 token 不可用(路径枚举被结构性排除)。
+      expect(
+        () => _client!.thumb(base, '123,45,6,7,8,9,10,11,12,13,14,15,16'),
+        throwsA(isA<MlfClientException>()),
+      );
+
+      // 同一 entry 重复 list 稳定复用 token。
+      final res2 = await _client!.getJson(
+        base,
+        'media/list?bucket=Pictures&type=image',
+      );
+      final real2 = (res2['entries'] as List)
+          .cast<Map<dynamic, dynamic>>()
+          .firstWhere((e) => e['name'] == 'real.png');
+      expect(real2['thumb'], real['thumb']);
+    },
+  );
 
   test('unknown bucket → 404; traversal-shaped bucket → 404', () async {
     expect(

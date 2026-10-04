@@ -5,6 +5,7 @@ import 'dart:io';
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:localsend_app/pages/mylanfiles/photo_grid.dart';
 import 'package:localsend_app/pages/mylanfiles/qr_scan_page.dart';
 import 'package:localsend_app/pages/mylanfiles/transfer_queue.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
@@ -57,6 +58,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   // 记忆化：已配对过的对端（客户端侧）与本机服务端口/配对表（服务端侧）。
   List<_RememberedServer> _servers = [];
   Directory? _identityDir;
+
+  // 视图模式：文件列表 / 相册网格。
+  bool _photosMode = false;
+
+  /// 当前 pin 的对端指纹（从地址栏解析出的配对信息）。
+  String? _pinnedFp;
 
   final TransferQueue _queue = TransferQueue();
 
@@ -599,6 +606,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     _client?.close();
     _client = null;
     try {
+      _pinnedFp = info.fingerprint;
       final client = MlfClient(pinnedFingerprint: info.fingerprint);
       // 握手即校验：证书指纹 ≠ 二维码指纹时 TLS 握手直接失败（§7 pin）。
       await client.pair(info.baseUri, _clientFingerprint);
@@ -607,6 +615,10 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       debugPrint('[MLF] pair ok -> ${info.baseUri}');
       await _rememberServer(info);
       await _listDir('/');
+      // E2E: MLF_PHOTOS=1 连接后直接切相册网格。
+      if (Platform.environment['MLF_PHOTOS'] == '1') {
+        setState(() => _photosMode = true);
+      }
       setState(() {});
     } on Object catch (e) {
       debugPrint('[MLF] connect FAILED: $e');
@@ -879,6 +891,25 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
   }
 
+  /// 相册网格点按：下载原图（复用单文件下载队列/断点）。
+  void _downloadMediaEntry(Map<dynamic, dynamic> entry) {
+    final path = entry['path'] as String?;
+    final name = entry['name'] as String? ?? 'media';
+    final size = (entry['size'] as num?)?.toInt() ?? 0;
+    if (path == null) {
+      return;
+    }
+    final fsEntry = FsEntry.fromMap(entry);
+    _queue.enqueue(
+      TransferTask(
+        label: name,
+        kind: TransferKind.singleFile,
+        totalBytes: fsEntry.size,
+        runner: (task) => _withReauth(() => _runDownload(task, fsEntry)),
+      ),
+    );
+  }
+
   /// 多选下载入口：按 §4.2 自适应规则选打包流或逐文件。
   Future<void> _downloadSelected() async {
     final files = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
@@ -901,6 +932,59 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   @override
   Widget build(BuildContext context) {
     final selectedFiles = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
+    if (_busy) {
+      return Scaffold(
+        appBar: AppBar(title: const Text('MyLanFiles 浏览')),
+        body: const Center(child: CircularProgressIndicator()),
+      );
+    }
+    if (_photosMode && _remoteBase != null && _client != null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: Text(
+            '相册 · ' + (_servers.where((s) => s.fp == _pinnedFp).map((s) => s.alias).firstOrNull ?? '对端'),
+          ),
+        ),
+        body: Column(
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+              child: Row(
+                children: [
+                  SegmentedButton<bool>(
+                    segments: const [
+                      ButtonSegment(value: false, label: Text('文件'), icon: Icon(Icons.folder_outlined)),
+                      ButtonSegment(value: true, label: Text('相册'), icon: Icon(Icons.photo_library_outlined)),
+                    ],
+                    selected: const {true},
+                    onSelectionChanged: (sel) => setState(() => _photosMode = sel.first),
+                  ),
+                  const Spacer(),
+                  IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: '刷新',
+                    onPressed: () => setState(() {}),
+                  ),
+                ],
+              ),
+            ),
+            Expanded(
+              child: MlfPhotoGrid(
+                client: _client!,
+                base: _remoteBase!,
+                onDownloadOriginal: _downloadMediaEntry,
+                key: ValueKey('photos-$_remoteBase'),
+              ),
+            ),
+            const Divider(height: 1),
+            SizedBox(
+              height: 200,
+              child: SingleChildScrollView(child: _buildQueuePanel()),
+            ),
+          ],
+        ),
+      );
+    }
     return Scaffold(
       appBar: AppBar(title: const Text('MyLanFiles 浏览')),
       body: _busy
@@ -928,6 +1012,20 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                   ),
                 const Divider(height: 24),
                 if (_remoteBase != null) ...[
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 8),
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: SegmentedButton<bool>(
+                        segments: const [
+                          ButtonSegment(value: false, label: Text('文件'), icon: Icon(Icons.folder_outlined)),
+                          ButtonSegment(value: true, label: Text('相册'), icon: Icon(Icons.photo_library_outlined)),
+                        ],
+                        selected: const {false},
+                        onSelectionChanged: (sel) => setState(() => _photosMode = sel.first),
+                      ),
+                    ),
+                  ),
                   _buildSelectionBar(selectedFiles),
                   ..._buildEntryList(),
                 ] else
