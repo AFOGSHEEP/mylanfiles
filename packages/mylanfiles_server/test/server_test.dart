@@ -134,6 +134,73 @@ void main() {
     }
   });
 
+  group('adversarial round-2 hardening', () {
+    test(
+      'pair: malformed JSON counts toward pair limiter (no bypass)',
+      () async {
+        var got429 = false;
+        for (var i = 0; i < 10 && !got429; i++) {
+          final res = await client.send(
+            http.Request('POST', base.resolve('api/v1/pair'))
+              ..body = 'not json',
+          );
+          expect(res.statusCode, anyOf(400, 429));
+          got429 = res.statusCode == 429;
+        }
+        expect(
+          got429,
+          isTrue,
+          reason: 'bad-json flood must hit the pair limiter',
+        );
+      },
+      timeout: const Timeout(Duration(minutes: 2)),
+    );
+
+    test('op: flat body without args object -> 400 (not 500)', () async {
+      final req = _authed('POST', '/api/v1/fs/op')
+        ..headers['content-type'] = 'application/json'
+        ..body = jsonEncode({'op': 'rename', 'path': 'a', 'newName': 'b'});
+      final res = await client.send(req);
+      expect(res.statusCode, 400);
+    });
+
+    test(
+      'op rename: traversal newName rejected (400, no silent sanitize)',
+      () async {
+        final req = _authed('POST', '/api/v1/fs/op')
+          ..headers['content-type'] = 'application/json'
+          ..body = jsonEncode({
+            'op': 'rename',
+            'args': {'path': '/up-a.txt', 'newName': '../evil'},
+          });
+        final res = await client.send(req);
+        expect(
+          res.statusCode,
+          anyOf(400, 404),
+        ); // 404: source missing; never 200
+      },
+    );
+
+    test('media: negative limit/offset -> 400', () async {
+      final req = _authed(
+        'GET',
+        '/api/v1/media/list',
+        query: {'bucket': 'DCIM', 'limit': '-1'},
+      );
+      final res = await client.send(req);
+      expect(res.statusCode, 400);
+    });
+
+    test('list: empty path param means root', () async {
+      final res = await client.send(
+        _authed('GET', '/api/v1/fs/list', query: {'path': ''}),
+      );
+      expect(res.statusCode, 200);
+      final body = jsonDecode(await res.stream.bytesToString()) as Map;
+      expect(body['path'], '/');
+    });
+  });
+
   group('fs endpoints (E2E)', () {
     test('list returns entries JSON', () async {
       final res = await client.send(_authed('GET', '/api/v1/fs/list'));

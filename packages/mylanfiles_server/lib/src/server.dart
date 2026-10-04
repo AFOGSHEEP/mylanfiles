@@ -147,14 +147,21 @@ class MlfServer {
     if (!_allowPairing) {
       return Response(404, body: jsonEncode({'error': 'pairing disabled'}));
     }
-    final body = jsonDecode(await req.readAsString()) as Map<dynamic, dynamic>;
+    final Map<dynamic, dynamic> body;
+    try {
+      body = jsonDecode(await req.readAsString()) as Map<dynamic, dynamic>;
+    } on FormatException {
+      // 畸形 JSON 也是失败:计数进 pair 限速器,避免无成本刷 /pair(对抗轮2)。
+      final pairInfo =
+          req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+      _pairLimiter.recordFailure(pairInfo?.remoteAddress.address ?? 'unknown');
+      return Response(400, body: jsonEncode({'error': 'bad json'}));
+    }
     final fingerprint = (body['fingerprint'] as String?)?.toLowerCase();
     if (!isValidFingerprint(fingerprint)) {
-      final info =
+      final pairInfo =
           req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
-      final info2 =
-          req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
-      _pairLimiter.recordFailure(info2?.remoteAddress.address ?? 'unknown');
+      _pairLimiter.recordFailure(pairInfo?.remoteAddress.address ?? 'unknown');
       return Response(400, body: jsonEncode({'error': 'invalid fingerprint'}));
     }
     _paired.add(fingerprint!);
@@ -168,7 +175,8 @@ class MlfServer {
 
   Future<Response> _list(Request req) async {
     try {
-      final path = req.url.queryParameters['path'] ?? '/';
+      final pathParam = req.url.queryParameters['path'];
+      final path = (pathParam == null || pathParam.isEmpty) ? '/' : pathParam;
       final entries = await _vfs.list(path);
       return Response.ok(
         jsonEncode({
@@ -249,29 +257,62 @@ class MlfServer {
       return Response(400, body: jsonEncode({'error': 'bad json'}));
     }
     final op = body['op'] as String?;
-    final args = (body['args'] as Map?)?.cast<String, dynamic>() ?? {};
+    final rawArgs = body['args'];
+    if (rawArgs is! Map) {
+      return Response(
+        400,
+        body: jsonEncode({'error': 'args must be an object'}),
+      );
+    }
+    final args = rawArgs.cast<String, dynamic>();
+    String? argStr(String key) =>
+        args[key] is String ? args[key] as String : null;
     try {
       switch (op) {
         case 'mkdir':
+          final path = argStr('path');
+          if (path == null) return _badArg('path');
           await _vfs.mkdir(
-            args['path'] as String,
+            path,
             recursive: args['recursive'] as bool? ?? false,
           );
           break;
         case 'delete':
+          final path = argStr('path');
+          if (path == null) return _badArg('path');
           await _vfs.delete(
-            args['path'] as String,
+            path,
             recursive: args['recursive'] as bool? ?? false,
           );
           break;
         case 'rename':
-          await _vfs.rename(args['path'] as String, args['newName'] as String);
+          final path = argStr('path');
+          final newName = argStr('newName');
+          if (path == null) return _badArg('path');
+          if (newName == null || newName.isEmpty) return _badArg('newName');
+          // 穿越式/非常规名显式拒绝(对抗轮2:静默消毒产生不可预期的合法名,
+          // 与上传原子落名契约不符)。
+          if (newName.contains('/') ||
+              newName.contains('\\') ||
+              sanitizeFilename(newName) != newName) {
+            return Response(
+              400,
+              body: jsonEncode({'error': 'invalid newName'}),
+            );
+          }
+          await _vfs.rename(path, newName);
           break;
         case 'copy':
-          await _vfs.copy(args['path'] as String, args['targetDir'] as String);
-          break;
         case 'move':
-          await _vfs.move(args['path'] as String, args['targetDir'] as String);
+          final path = argStr('path');
+          final targetDir = argStr('targetDir');
+          if (path == null) return _badArg('path');
+          if (targetDir == null) return _badArg('targetDir');
+          if (op == 'copy') {
+            await _vfs.copy(path, targetDir);
+          } else {
+            await _vfs.move(path, targetDir);
+          }
           break;
         default:
           return Response(400, body: jsonEncode({'error': 'unknown op: $op'}));
@@ -349,16 +390,21 @@ class MlfServer {
           headers: _jsonHeaders,
         );
       }
+      final limit = params['limit'] == null
+          ? 200
+          : int.tryParse(params['limit']!) ?? 200;
+      final offset = params['offset'] == null
+          ? 0
+          : int.tryParse(params['offset']!) ?? 0;
+      if (limit < 0 || offset < 0 || limit > 10000) {
+        return Response(400, body: jsonEncode({'error': 'bad limit/offset'}));
+      }
       final result = await _media.listBucket(
         params['bucket']!,
         type: params['type'] ?? 'any',
         since: params['since'] == null ? null : int.tryParse(params['since']!),
-        limit: params['limit'] == null
-            ? 200
-            : int.tryParse(params['limit']!) ?? 200,
-        offset: params['offset'] == null
-            ? 0
-            : int.tryParse(params['offset']!) ?? 0,
+        limit: limit,
+        offset: offset,
       );
       return Response.ok(jsonEncode(result), headers: _jsonHeaders);
     } on MediaBucketNotFoundException {
@@ -373,6 +419,11 @@ class MlfServer {
   static const _jsonHeaders = {
     'content-type': 'application/json; charset=utf-8',
   };
+
+  Response _badArg(String field) => Response(
+    400,
+    body: jsonEncode({'error': 'missing or invalid field: ' + field}),
+  );
 
   Response _forbidden() =>
       Response(403, body: jsonEncode({'error': 'forbidden'}));
