@@ -70,10 +70,32 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         unawaited(_autoStartForE2E());
       });
     } else if (Platform.isAndroid) {
-      // Android 联调捷径：/sdcard/Download/mlf-pairing.json 存在时自动填入并连接。
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        unawaited(_autoPairFromFile());
+      // Android 联调捷径 A：mlf-server.flag 存在 → 本机直接开服务（反向场景：
+      // 手机当服务端、PC 当客户端），配对 JSON 打进 logcat 供 PC 侧取用。
+      // 联调捷径 B：mlf-pairing.json 存在 → 自动填入并连接远端。
+      WidgetsBinding.instance.addPostFrameCallback((_) async {
+        if (File('/storage/emulated/0/Download/mlf-server.flag').existsSync()) {
+          await _autoStartForE2E();
+        }
+        if (File('/storage/emulated/0/Download/mlf-pairing.json').existsSync()) {
+          await _autoPairFromFile();
+        }
       });
+    } else {
+      // 桌面联调捷径：MLF_PAIR_FILE 指向配对 JSON → 自动连接（反向场景用）。
+      final pairFile = Platform.environment['MLF_PAIR_FILE'];
+      if (pairFile != null && pairFile.isNotEmpty) {
+        WidgetsBinding.instance.addPostFrameCallback((_) async {
+          try {
+            final raw = (await File(pairFile).readAsString()).trim();
+            debugPrint('[MLF] pair-file loaded (${raw.length} chars)');
+            _addressController.text = raw;
+            await _connect();
+          } on Object catch (e) {
+            debugPrint('[MLF] pair-file error: $e');
+          }
+        });
+      }
     }
   }
 

@@ -189,6 +189,20 @@ class MlfClient {
     return PackStreamReader(res.stream);
   }
 
+  /// GET any §4.1 endpoint and parse the JSON body (tests/tools helper).
+  Future<dynamic> getJson(Uri base, String endpointAndQuery) async {
+    final res = await _inner.get(
+      resolve(base, endpointAndQuery),
+      headers: _authHeaders,
+    );
+    if (res.statusCode != 200) {
+      throw MlfClientException(
+        'GET $endpointAndQuery failed: ${res.statusCode}',
+      );
+    }
+    return jsonDecode(res.body);
+  }
+
   /// Raw chunked PUT (§4.1 fs/write). [offset] > 0 resumes the remote file
   /// at that byte position. Returns the remote size reported by the server.
   Future<int> write(
@@ -199,13 +213,12 @@ class MlfClient {
   ) async {
     final req = http.StreamedRequest(
       'PUT',
-      resolve(base, 'fs/write').replace(
-        queryParameters: {'path': path, 'offset': '$offset'},
-      ),
+      resolve(
+        base,
+        'fs/write',
+      ).replace(queryParameters: {'path': path, 'offset': '$offset'}),
     )..headers.addAll(_authHeaders);
-    unawaited(
-      req.sink.addStream(body).then((_) => req.sink.close()),
-    );
+    unawaited(req.sink.addStream(body).then((_) => req.sink.close()));
     final res = await _inner.send(req);
     if (res.statusCode != 200) {
       await res.stream.drain<void>().catchError((Object _) {});
@@ -213,7 +226,8 @@ class MlfClient {
     }
     final size =
         (jsonDecode(await res.stream.bytesToString())
-            as Map<dynamic, dynamic>)['size'] as int;
+                as Map<dynamic, dynamic>)['size']
+            as int;
     return size;
   }
 
@@ -276,7 +290,10 @@ class MlfClient {
     final size = await write(
       base,
       partPath,
-      countBytes(file.openRead(offset), (d) => onProgress?.call(sent += d, total)),
+      countBytes(
+        file.openRead(offset),
+        (d) => onProgress?.call(sent += d, total),
+      ),
       offset,
     );
     if (size != total) {

@@ -16,6 +16,7 @@ import 'package:shelf/shelf_io.dart' as shelf_io;
 import 'package:shelf_router/shelf_router.dart';
 
 import 'auth.dart';
+import 'media.dart';
 
 const _fingerprintHeader = 'x-mlf-fingerprint';
 
@@ -31,13 +32,24 @@ class MlfServer {
     Set<String> pairedFingerprints = const {},
     bool allowPairing = true,
     RateLimiter? rateLimiter,
+    MediaService? media,
   }) : _vfs = vfs,
        _serverFingerprint = serverFingerprint,
        _paired = {...pairedFingerprints},
        _allowPairing = allowPairing,
-       _rateLimiter = rateLimiter ?? RateLimiter();
+       _rateLimiter = rateLimiter ?? RateLimiter(),
+       _media = media ?? MediaService(vfs),
+       _pairLimiter = RateLimiter(
+         maxFailures: 5,
+         window: const Duration(minutes: 1),
+       );
 
   final Vfs _vfs;
+  final MediaService _media;
+
+  /// /pair 端点自己的限速器（R-014）：业务失败黑名单不锁扫码恢复路径，
+  /// 但爆破 pair 本身仍会被它锁住。
+  final RateLimiter _pairLimiter;
   final String _serverFingerprint;
   final Set<String> _paired;
   final bool _allowPairing;
@@ -60,7 +72,8 @@ class MlfServer {
       ..get('/api/v1/fs/read', _read)
       ..put('/api/v1/fs/write', _write)
       ..post('/api/v1/fs/op', _op)
-      ..post('/api/v1/pack', _pack);
+      ..post('/api/v1/pack', _pack)
+      ..get('/api/v1/media/list', _mediaList);
     return const Pipeline().addMiddleware(_auth()).addHandler(router.call);
   }
 
@@ -99,16 +112,25 @@ class MlfServer {
         final info =
             req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
         final ip = info?.remoteAddress.address ?? 'unknown';
+        // R-014: pairing stays reachable even for blocked IPs — the QR-scan
+        // recovery path must not be locked out by earlier failures. The
+        // endpoint itself records failures (invalid fingerprint) into the
+        // same limiter, so brute-forcing pair still locks it out.
+        final isPair = '/${req.url.path}' == '/api/v1/pair' && _allowPairing;
+        if (isPair) {
+          if (_pairLimiter.isBlocked(ip)) {
+            return Response(
+              429,
+              body: jsonEncode({'error': 'too many pairing failures'}),
+            );
+          }
+          return inner(req);
+        }
         if (_rateLimiter.isBlocked(ip)) {
           return Response(
             429,
             body: jsonEncode({'error': 'too many failures'}),
           );
-        }
-        // Pairing is how a client BECOMES paired — exempt it from the gate
-        // (the endpoint itself checks _allowPairing and rate limits still apply).
-        if ('/${req.url.path}' == '/api/v1/pair' && _allowPairing) {
-          return inner(req);
         }
         final fingerprint = req.headers[_fingerprintHeader]?.toLowerCase();
         if (!isValidFingerprint(fingerprint) ||
@@ -128,9 +150,17 @@ class MlfServer {
     final body = jsonDecode(await req.readAsString()) as Map<dynamic, dynamic>;
     final fingerprint = (body['fingerprint'] as String?)?.toLowerCase();
     if (!isValidFingerprint(fingerprint)) {
+      final info =
+          req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+      final info2 =
+          req.context['shelf.io.connection_info'] as HttpConnectionInfo?;
+      _pairLimiter.recordFailure(info2?.remoteAddress.address ?? 'unknown');
       return Response(400, body: jsonEncode({'error': 'invalid fingerprint'}));
     }
     _paired.add(fingerprint!);
+    // 成功配对是强合法信号：清掉两套限速状态，扫码恢复路径立即解锁（R-014）。
+    _rateLimiter.reset();
+    _pairLimiter.reset();
     return Response.ok(
       jsonEncode({'status': 'paired', 'serverFingerprint': _serverFingerprint}),
     );
@@ -305,6 +335,37 @@ class MlfServer {
       frames(),
       headers: {'content-type': 'application/octet-stream'},
     );
+  }
+
+  /// GET /api/v1/media/list?bucket=&type=&since=&limit=&offset=
+  /// 无 bucket → 桶清单;有 bucket → 桶内媒体(类型过滤,mtime 倒序,分页)。
+  Future<Response> _mediaList(Request req) async {
+    final params = req.url.queryParameters;
+    try {
+      if (params['bucket'] == null || params['bucket']!.isEmpty) {
+        final buckets = await _media.listBuckets();
+        return Response.ok(
+          jsonEncode({'buckets': buckets}),
+          headers: _jsonHeaders,
+        );
+      }
+      final result = await _media.listBucket(
+        params['bucket']!,
+        type: params['type'] ?? 'any',
+        since: params['since'] == null ? null : int.tryParse(params['since']!),
+        limit: params['limit'] == null
+            ? 200
+            : int.tryParse(params['limit']!) ?? 200,
+        offset: params['offset'] == null
+            ? 0
+            : int.tryParse(params['offset']!) ?? 0,
+      );
+      return Response.ok(jsonEncode(result), headers: _jsonHeaders);
+    } on MediaBucketNotFoundException {
+      return _notFound();
+    } on PathAccessException {
+      return _forbidden();
+    }
   }
 
   // ---- helpers ----

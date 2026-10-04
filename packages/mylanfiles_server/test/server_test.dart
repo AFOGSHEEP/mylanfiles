@@ -84,6 +84,56 @@ void main() {
     });
   });
 
+  test('R-014: blocked IP can still pair (QR recovery path)', () async {
+    final tmp2 = await Directory.systemTemp.createTemp('mlf_pair_block');
+    final server2 = MlfServer(
+      vfs: LocalVfs(root: tmp2.path),
+      serverFingerprint: 'a' * 64,
+      pairedFingerprints: const {},
+    );
+    await server2.bind(InternetAddress.loopbackIPv4, 0);
+    final base2 = Uri.parse('http://127.0.0.1:${server2.port}/');
+    final c2 = http.Client();
+    try {
+      // 连续未配对请求直到拉黑(同 IP)。
+      var saw429 = false;
+      for (var i = 0; i < 8 && !saw429; i++) {
+        final res = await c2.get(base2.resolve('api/v1/fs/list'));
+        saw429 = res.statusCode == 429;
+      }
+      expect(saw429, isTrue, reason: 'precondition: IP is blocked');
+
+      // 拉黑后 /pair 仍可达:合法指纹配对成功。
+      final pairRes = await c2.post(
+        base2.resolve('api/v1/pair'),
+        body: jsonEncode({'fingerprint': 'c' * 64}),
+      );
+      expect(pairRes.statusCode, 200);
+
+      // 配对成功重置限速 → 业务请求恢复。
+      final okRes = await c2.get(
+        base2.resolve('api/v1/fs/list'),
+        headers: {'x-mlf-fingerprint': 'c' * 64},
+      );
+      expect(okRes.statusCode, 200);
+
+      // 爆破 pair(坏指纹)也会被计数并再次拉黑。
+      var pair429 = false;
+      for (var i = 0; i < 8 && !pair429; i++) {
+        final res = await c2.post(
+          base2.resolve('api/v1/pair'),
+          body: jsonEncode({'fingerprint': 'bad'}),
+        );
+        pair429 = res.statusCode == 429;
+      }
+      expect(pair429, isTrue, reason: 'brute-forcing pair must lock out');
+    } finally {
+      c2.close();
+      await server2.stop();
+      await tmp2.delete(recursive: true);
+    }
+  });
+
   group('fs endpoints (E2E)', () {
     test('list returns entries JSON', () async {
       final res = await client.send(_authed('GET', '/api/v1/fs/list'));

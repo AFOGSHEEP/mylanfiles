@@ -70,7 +70,8 @@ void main() {
     });
 
     test('failure marks the task, queue continues, retry re-runs', () async {
-      final queue = TransferQueue();
+      // 空退避表 = 不自动重试,失败立即可见(手动重试路径专用语义)。
+      final queue = TransferQueue(backoffSchedule: const []);
       addTearDown(queue.dispose);
       var ran = 0;
 
@@ -108,8 +109,7 @@ void main() {
       expect(ran, 2);
     });
 
-    test('cancel: queued task never runs; running task cancels at checkpoint',
-        () async {
+    test('cancel: queued task never runs; running task cancels at checkpoint', () async {
       final queue = TransferQueue();
       addTearDown(queue.dispose);
       final started = Completer<void>();
@@ -158,6 +158,56 @@ void main() {
       await Future<void>.delayed(const Duration(milliseconds: 30));
       expect(queued.state, TransferState.done);
       expect(runs, 2);
+    });
+
+    test('auto-retry with backoff: transient failure self-heals', () async {
+      final queue = TransferQueue(
+        backoffSchedule: const [Duration(milliseconds: 50), Duration(milliseconds: 80)],
+      );
+      addTearDown(queue.dispose);
+      var runs = 0;
+
+      final flaky = TransferTask(
+        label: 'flaky',
+        kind: TransferKind.singleFile,
+        totalBytes: 10,
+        runner: (task) async {
+          runs++;
+          if (runs < 3) {
+            throw Exception('transient network blip');
+          }
+          task.addBytes(10);
+        },
+      );
+      queue.enqueue(flaky);
+
+      // 两次失败各退避一次后成功(50ms + 80ms,留足余量)。
+      await Future<void>.delayed(const Duration(milliseconds: 400));
+      expect(runs, 3, reason: 'retried twice then succeeded');
+      expect(flaky.state, TransferState.done);
+      expect(flaky.autoRetries, 2);
+    });
+
+    test('auto-retry exhausts backoff schedule then marks failed', () async {
+      final queue = TransferQueue(
+        backoffSchedule: const [Duration(milliseconds: 30), Duration(milliseconds: 30)],
+      );
+      addTearDown(queue.dispose);
+      var runs = 0;
+
+      final doomed = TransferTask(
+        label: 'doomed',
+        kind: TransferKind.singleFile,
+        totalBytes: 1,
+        runner: (_) async {
+          runs++;
+          throw Exception('hard failure');
+        },
+      );
+      queue.enqueue(doomed);
+      await Future<void>.delayed(const Duration(milliseconds: 300));
+      expect(runs, 3, reason: '1 initial + 2 backoff retries');
+      expect(doomed.state, TransferState.failed);
     });
 
     test('clearFinished keeps queued/running tasks', () async {
