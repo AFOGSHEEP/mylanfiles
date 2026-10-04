@@ -594,6 +594,9 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     final listener = DiscoveryListener(
       onChanged: (servers) {
+        debugPrint(
+          '[MLF] discovered: ' + servers.map((d) => d.alias + '@' + d.ip).join(', '),
+        );
         if (mounted) {
           setState(() => _discovered = servers);
         }
@@ -806,8 +809,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     final part = File('${inbox.path}/$safeName.part');
     var offset = part.existsSync() ? await part.length() : 0;
     debugPrint('[MLF] download ${entry.name} @offset=$offset size=${entry.size}');
-    // 大文件全新下载走 4 路并行(真机基线:单流 2.7MB/s)。
-    if (offset == 0 && entry.size >= _parallelThreshold && _client != null && _remoteBase != null) {
+    // 大文件全新下载走 4 路并行(真机基线:单流 2.7MB/s);MLF_PARALLEL=0 关闭(A/B)。
+    if (offset == 0 &&
+        entry.size >= _parallelThreshold &&
+        Platform.environment['MLF_PARALLEL'] != '0' &&
+        _client != null &&
+        _remoteBase != null) {
       final t0 = DateTime.now();
       try {
         await _runParallelDownload(task, entry, part);
