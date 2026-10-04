@@ -38,8 +38,18 @@ class PathGuard {
   /// Resolves [requested] (relative or absolute, already URL-decoded) to a
   /// normalized absolute path guaranteed to be inside [root].
   ///
-  /// Throws [PathAccessException] for any escape attempt (`..`, absolute
-  /// paths outside the root, UNC paths, …) and for empty input.
+  /// Path forms accepted (R-013 virtual path semantics):
+  /// - **Virtual**: `/sub/name` — the leading `/` addresses the *shared
+  ///   root*, never the host filesystem. This is the canonical protocol form.
+  /// - **Relative**: `sub/name` — anchored to the shared root.
+  /// - **Legacy host-absolute**: a drive/POSIX-absolute path that already
+  ///   lies inside the shared root (what earlier versions of LocalVfs
+  ///   returned). Accepted for backward compatibility; anything absolute
+  ///   *outside* the root is re-anchored as a virtual path (and thus either
+  ///   404s or fails containment) — host layout never leaks.
+  ///
+  /// Throws [PathAccessException] for any escape attempt (`..`, UNC paths, …)
+  /// and for empty input.
   String resolve(String requested) {
     if (requested.trim().isEmpty) {
       throw PathAccessException(requested, 'empty path');
@@ -49,9 +59,9 @@ class PathGuard {
     if (s.replaceAll('/', '').isEmpty) {
       return root; // "/" or "//" etc. — the client asked for the root itself
     }
-    // Anchor to the shared root unless the request itself is absolute;
-    // absolute requests are accepted as-is and must survive containment.
-    final joined = _isAbsoluteRequest(s) ? s : '$root/$s';
+    final joined = _isLegacyHostAbsolute(s)
+        ? s
+        : '$root/${s.startsWith('/') ? s.substring(1) : s}';
     final posixAbs = joined.startsWith('/');
 
     final out = <String>[];
@@ -85,7 +95,43 @@ class PathGuard {
 
   String _comparable(String p) => caseSensitive ? p : p.toLowerCase();
 
-  static bool _isAbsoluteRequest(String s) => _hasDrive(s) || s.startsWith('/');
+  /// Direct containment check for a **real** (already symlink-resolved)
+  /// host path — used by the symlink re-check (§7-2). Unlike [resolve] this
+  /// never re-anchors: a real path outside the root is outside, period.
+  bool containsReal(String hostPath) {
+    final cmp = _comparable(hostPath.replaceAll('\\', '/'));
+    return cmp == _rootComparable || cmp.startsWith('$_rootComparable/');
+  }
+
+  /// True when [s] is a drive/POSIX-absolute path that already addresses
+  /// inside the shared root (legacy form). Everything else — including any
+  /// path outside the root — is treated as virtual/relative (R-013).
+  bool _isLegacyHostAbsolute(String s) {
+    final absolute = _hasDrive(s) || s.startsWith('/');
+    if (!absolute) {
+      return false;
+    }
+    final cmp = _comparable(s);
+    return cmp == _rootComparable || cmp.startsWith('$_rootComparable/');
+  }
+
+  /// Maps a resolved host-absolute path back to the canonical virtual form
+  /// (`/`= root, `/sub/name` inside). This is what the protocol returns so
+  /// the host layout never leaks (R-013, §7).
+  String toVirtual(String hostAbsolute) {
+    var s = hostAbsolute.replaceAll('\\', '/');
+    final cmp = _comparable(s);
+    if (cmp == _rootComparable) {
+      return '/';
+    }
+    if (cmp.startsWith('$_rootComparable/')) {
+      final rel = s.substring(root.length);
+      return rel.startsWith('/') ? rel : '/$rel';
+    }
+    // Outside the root should never happen (callers only pass resolved
+    // paths); fall back to the raw string rather than throw at mapping time.
+    return s.startsWith('/') ? s : '/$s';
+  }
 
   /// Normalizes the trusted root: separators, dot segments, no trailing sep,
   /// POSIX leading slash / drive letter preserved.

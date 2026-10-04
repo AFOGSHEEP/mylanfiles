@@ -48,8 +48,10 @@ Future<void> main() async {
   await server.bind(InternetAddress.loopbackIPv4, 0);
   final base = 'http://127.0.0.1:${server.port}';
   final client = http.Client();
-  await client.post(Uri.parse('$base/api/v1/pair'),
-      body: jsonEncode({'fingerprint': 'a' * 64}));
+  await client.post(
+    Uri.parse('$base/api/v1/pair'),
+    body: jsonEncode({'fingerprint': 'a' * 64}),
+  );
   final headers = {'x-mlf-fingerprint': 'a' * 64};
 
   Future<void> perFile({required bool rtt}) async {
@@ -68,9 +70,11 @@ Future<void> main() async {
   }
 
   Future<void> packStream() async {
-    final res = await client.send(http.Request('POST', Uri.parse('$base/api/v1/pack'))
-      ..headers['x-mlf-fingerprint'] = 'a' * 64
-      ..body = jsonEncode({'items': names, 'skip': []}));
+    final res = await client.send(
+      http.Request('POST', Uri.parse('$base/api/v1/pack'))
+        ..headers['x-mlf-fingerprint'] = 'a' * 64
+        ..body = jsonEncode({'items': names, 'skip': []}),
+    );
     if (res.statusCode != 200) {
       throw 'pack -> ${res.statusCode}';
     }
@@ -96,11 +100,15 @@ Future<void> main() async {
     await fn();
     sw.stop();
     final mbps = totalBytes / 1024 / 1024 / (sw.elapsedMicroseconds / 1e6);
-    stdout.writeln('$label: ${sw.elapsedMilliseconds} ms  => ${mbps.toStringAsFixed(1)} MB/s');
+    stdout.writeln(
+      '$label: ${sw.elapsedMilliseconds} ms  => ${mbps.toStringAsFixed(1)} MB/s',
+    );
   }
 
-  print('files=$smallCount x ${smallSize ~/ 1024}KB + $midCount x 1MB, '
-      'total=${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB');
+  print(
+    'files=$smallCount x ${smallSize ~/ 1024}KB + $midCount x 1MB, '
+    'total=${(totalBytes / 1024 / 1024).toStringAsFixed(1)} MB',
+  );
   stdout.writeln('setup done, benches starting...');
   await bench('A 逐文件 (无RTT)      ', () => perFile(rtt: false));
   await bench('B 逐文件 (模拟3ms RTT)', () => perFile(rtt: true));
@@ -116,12 +124,16 @@ Future<void> main() async {
   await raf.close();
   {
     final sw = Stopwatch()..start();
-    final res = await client.send(http.Request('GET',
-        Uri.parse('$base/api/v1/fs/read?path=big.bin'))..headers.addAll(headers));
+    final res = await client.send(
+      http.Request('GET', Uri.parse('$base/api/v1/fs/read?path=big.bin'))
+        ..headers.addAll(headers),
+    );
     final got = await res.stream.toBytes();
     sw.stop();
-    stdout.writeln('D 大文件单流 (${got.length ~/ 1024 / 1024}MB): ${sw.elapsedMilliseconds} ms '
-        '=> ${(bigSize / 1024 / 1024 / (sw.elapsedMicroseconds / 1e6)).toStringAsFixed(0)} MB/s');
+    stdout.writeln(
+      'D 大文件单流 (${got.length ~/ 1024 / 1024}MB): ${sw.elapsedMilliseconds} ms '
+      '=> ${(bigSize / 1024 / 1024 / (sw.elapsedMicroseconds / 1e6)).toStringAsFixed(0)} MB/s',
+    );
   }
 
   await server.stop();

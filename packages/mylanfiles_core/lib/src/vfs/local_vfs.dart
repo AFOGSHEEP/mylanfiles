@@ -40,7 +40,8 @@ class LocalVfs implements Vfs {
       entries.add(
         FsEntry(
           name: _basename(e.path),
-          path: e.path.replaceAll('\\', '/'),
+          // Virtual path (R-013): `/` = root; host layout never leaves the VFS.
+          path: _guard.toVirtual(e.path),
           isDir:
               FileSystemEntity.typeSync(e.path, followLinks: true) ==
               FileSystemEntityType.directory,
@@ -64,7 +65,7 @@ class LocalVfs implements Vfs {
     final stat = FileStat.statSync(real);
     return FsEntry(
       name: _basename(real),
-      path: real.replaceAll('\\', '/'),
+      path: _guard.toVirtual(real),
       isDir: t == FileSystemEntityType.directory,
       size: t == FileSystemEntityType.directory ? 0 : stat.size,
       mtime: stat.modified,
@@ -219,9 +220,7 @@ class LocalVfs implements Vfs {
       t,
       p,
     ).resolveSymbolicLinksSync().replaceAll('\\', '/');
-    try {
-      _guard.resolve(real);
-    } on PathAccessException {
+    if (!_guard.containsReal(real)) {
       throw PathAccessException(p, 'symlink escapes shared root');
     }
     return real;

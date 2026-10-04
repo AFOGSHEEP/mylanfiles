@@ -250,16 +250,46 @@ void main() {
       expect(res.statusCode, 403);
     });
 
-    test('absolute path outside root is rejected (403)', () async {
-      final res = await client.send(
-        _authed(
-          'GET',
-          '/api/v1/fs/read',
-          query: {'path': 'C:/Windows/win.ini'},
-        ),
-      );
-      expect(res.statusCode, 403);
-    });
+    test(
+      'host-absolute outside root never serves content (R-013: virtual-anchored → 404)',
+      () async {
+        final res = await client.send(
+          _authed(
+            'GET',
+            '/api/v1/fs/read',
+            query: {'path': 'C:/Windows/win.ini'},
+          ),
+        );
+        // The path is re-anchored inside the shared root (host layout never
+        // addressed) and simply does not exist there.
+        expect(res.statusCode, 404);
+        expect(await res.stream.bytesToString(), isNot(contains('windows')));
+      },
+    );
+
+    test(
+      'virtual path form "/name" addresses the shared root (R-013)',
+      () async {
+        // Write a file via relative name, then read it back via the virtual
+        // "/name" form — the canonical third-party client convention.
+        final put = _authed(
+          'PUT',
+          '/api/v1/fs/write',
+          query: {'path': 'virtual-form.txt'},
+        )..bodyBytes = utf8.encode('virtual ok');
+        expect((await client.send(put)).statusCode, 200);
+
+        final res = await client.send(
+          _authed(
+            'GET',
+            '/api/v1/fs/read',
+            query: {'path': '/virtual-form.txt'},
+          ),
+        );
+        expect(res.statusCode, 200);
+        expect(await res.stream.bytesToString(), 'virtual ok');
+      },
+    );
 
     test('write outside root is rejected (403)', () async {
       final req = _authed(
