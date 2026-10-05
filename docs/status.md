@@ -39,6 +39,11 @@
 F:\bin\gh.exe auth login --hostname github.com
 ```
 
+## R8 Demo 轮（2026-10-05,决策人目标:「多端部署、初步功能的初版 demo」）
+
+**交付物 `F:\MyLanFiles\demo\`**:①`MyLanFiles-android-v0.1.0.apk`(签名 release,146MB);②`localsend-app-win64-v0.1.0.zip`(release,解压即用);③`mlf-serve.exe`(**无头服务器单二进制 10.4MB**,`--root/--alias/--port/--no-pair`,身份在共享根外,端口持久,自动发现);④快速开始 README。
+**验证**:mlf-serve 被 PC 客户端 Wi-Fi 发现(DEMO-NAS)→配对→打包下载 sha 全等;Windows release(AOT)配对下载 sha 全等;Android release 装机待决策人点 MIUI 弹窗(debug 版全程在机,功能矩阵已全绿)。iOS/macOS/Linux:源码兼容,各自平台一条命令编译(README 有)。
+
 ## R7 补充轮（2026-10-05,决策人批评驱动:「不能自己发现设备,太极客」「传输算法深度优化」）
 
 1. **自动发现(大众化核心)**:UDP 广播宣告/监听(core 包,广播而非组播=零权限零平台通道);浏览页「附近设备」chips,点一下即连(与扫码同一条 pin 配对路径,安全模型不降级);**真机验证:PC 纯 Wi-Fi 发现手机(`discovered: Android 设备@192.168.3.149`),零 USB 零配置**。首次使用流程缩短为:两端开 app→点设备→用。
