@@ -93,6 +93,9 @@ jobs:
 
   packaging:
     runs-on: ubuntu-latest
+    # Fork guard: this job asserts pubspec == upstream release versions;
+    # MyLanFiles carries its own version line, so skip on forks.
+    if: github.repository == 'localsend/localsend'
 
     steps:
       - uses: actions/checkout@v6
