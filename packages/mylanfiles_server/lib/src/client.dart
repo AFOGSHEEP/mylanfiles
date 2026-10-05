@@ -365,19 +365,22 @@ Future<String?> lanIPv4() async {
     includeLoopback: false,
     includeLinkLocal: false,
   );
-  for (final interface in interfaces) {
-    for (final addr in interface.addresses) {
-      final octets = addr.address.split('.').map(int.parse).toList();
-      final siteLocal =
-          octets[0] == 10 ||
-          octets[0] == 192 && octets[1] == 168 ||
-          octets[0] == 172 && octets[1] >= 16 && octets[1] <= 31;
-      if (siteLocal) {
+  // 按前缀优先级挑「最像对端可达」的地址:192.168(家庭/办公 WLAN)最优先,
+  // 10.x 次之,172.16-31 常是热点/虚拟接口(swm/VMware/Hyper-V)放最后。
+  // 真机踩雷:接口顺序把 172.19.0.1(虚拟)排在了 WLAN 前,QR 给出不可达地址。
+  final prefs = <bool Function(int, int)>[
+    (a, b) => a == 192 && b == 168,
+    (a, b) => a == 10,
+    (a, b) => a == 172 && b >= 16 && b <= 31,
+  ];
+  final all = interfaces.expand((i) => i.addresses).toList();
+  for (final pref in prefs) {
+    for (final addr in all) {
+      final o = addr.address.split('.').map(int.parse).toList();
+      if (o.length == 4 && pref(o[0], o[1])) {
         return addr.address;
       }
     }
   }
-  return interfaces.isNotEmpty
-      ? interfaces.first.addresses.first.address
-      : null;
+  return all.isNotEmpty ? all.first.address : null;
 }

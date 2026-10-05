@@ -766,6 +766,17 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     final raf = await part.open(mode: FileMode.write);
     await raf.truncate(size); // 预分配,块到位即偏移写入
     final chunk = (size + _parallelChunks - 1) ~/ _parallelChunks;
+    // 单 RAF 上的偏移写必须串行化:setPosition+writeFrom 两步间会与其他
+    // 块的 await 交错(真机踩雷:writeFrom 第二参是缓冲区下标而非文件偏移)。
+    var writeChain = Future<void>.value();
+    Future<void> lockedWriteAt(int pos, List<int> data) {
+      writeChain = writeChain.then((_) async {
+        await raf.setPosition(pos);
+        await raf.writeFrom(data);
+      });
+      return writeChain;
+    }
+
     final futures = <Future<void>>[];
     for (var i = 0; i < _parallelChunks; i++) {
       final start = i * chunk;
@@ -784,7 +795,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         await for (final data in res.stream) {
           _throwIfCanceled(task);
           task.addBytes(data.length);
-          await raf.writeFrom(data, pos);
+          await lockedWriteAt(pos, data);
           pos += data.length;
         }
         if (pos != start + len) {
@@ -845,6 +856,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       task.setDetail('断点续传：从 ${formatBytes(offset)} 处继续');
       task.receivedBytes = offset;
     }
+    final t0 = DateTime.now();
     try {
       final res = await _client!.read(_remoteBase!, entry.path, offset: offset);
       final sink = part.openWrite(mode: FileMode.append);
@@ -872,7 +884,10 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       rethrow;
     }
     await _finalizePart(part, File('${inbox.path}/$safeName'));
-    debugPrint('[MLF] download done: $safeName');
+    debugPrint(
+      '[MLF] serial done: ' + safeName + ' in ' +
+          DateTime.now().difference(t0).inMilliseconds.toString() + 'ms',
+    );
   }
 
   Future<void> _finalizePart(File part, File target) async {

@@ -182,6 +182,7 @@ class TransferQueue extends ChangeNotifier {
               ..error = '$e';
             debugPrint('TransferQueue: auto-retry "${next.label}" in $delay');
           } else {
+            debugPrint('TransferQueue: task failed: ' + e.toString());
             next
               ..state = TransferState.failed
               ..error = '$e';
