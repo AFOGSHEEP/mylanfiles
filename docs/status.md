@@ -8,7 +8,7 @@
 
 > 每次会话结束更新。结构：当前阶段 / 已完成 / 下一步 / 待决策人确认事项。
 
-- 更新：2026-10-04（P1 第 6 轮 R6——日常可用：入口正名/记忆化配对/相册网格/完整性回执，计划见 docs/plan-p1-round6.md）
+- 更新：2026-10-05（R7 补充轮——大众化自动发现 + 传输算法优化，决策人两项目标驱动；研究笔记 docs/research/transfer-optimization.md）
 - 本机项目根：`F:\MyLanFiles`
 - 正式仓库：`F:\MyLanFiles\repo`（分支 `feat/p1-vfs-server`，本地 20+ 提交待推送）
 
@@ -38,6 +38,13 @@
 ```
 F:\bin\gh.exe auth login --hostname github.com
 ```
+
+## R7 补充轮（2026-10-05,决策人批评驱动:「不能自己发现设备,太极客」「传输算法深度优化」）
+
+1. **自动发现(大众化核心)**:UDP 广播宣告/监听(core 包,广播而非组播=零权限零平台通道);浏览页「附近设备」chips,点一下即连(与扫码同一条 pin 配对路径,安全模型不降级);**真机验证:PC 纯 Wi-Fi 发现手机(`discovered: Android 设备@192.168.3.149`),零 USB 零配置**。首次使用流程缩短为:两端开 app→点设备→用。
+2. **传输优化(学术检索→工程)**:见 docs/research/transfer-optimization.md(Mathis 方程/并行 TCP 模型/FastCDC/shelf-H2 现状,全引用)。落地:≥8MB 全新下载自动 4 路 Range 并行(交错 A/B 实测 **2.25×**:11.2 vs 5.0 MB/s,5 轮全 sha 校验);缩略图 isolate 解码 1.17×(如实记录,原生解码列 P2)。
+3. 修:QR 的 lanIPv4 接口优选(虚拟 172 网段曾排在 WLAN 前);RAF 偏移写陷阱(writeFrom 第二参=缓冲区下标);队列失败日志;串行计时日志。
+4. 顺手:上传 64MB 验证对称 ✓;测试 core 49 + server 41 + app 10 = 100 绿。
 
 ## 第 6 轮已完成（R6,计划 6 工作流全落地）
 
