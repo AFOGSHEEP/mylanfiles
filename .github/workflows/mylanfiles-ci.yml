@@ -21,7 +21,7 @@ jobs:
       - uses: flutter-actions/setup-flutter@v4
         with:
           channel: stable
-          flutter-version: 3.41.9 # match upstream .fvmrc so the shared pub workspace resolves identically
+          flutter-version: 3.47.5 # dev parity: gradle/kotlin minimums and Dart features were validated on this version
 
       - name: Pub get (workspace)
         run: dart pub get
@@ -35,6 +35,12 @@ jobs:
         run: |
           dart analyze packages/mylanfiles_core
           dart analyze packages/mylanfiles_server
+
+      - name: App analyze (mylanfiles surface)
+        run: flutter analyze app
+
+      - name: App unit tests (mylanfiles)
+        run: flutter test app/test/unit/pages/mylanfiles
 
       - name: Test (core)
         working-directory: packages/mylanfiles_core

@@ -10,7 +10,6 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:http/http.dart' as http;
 import 'package:mylanfiles_core/mylanfiles_core.dart';

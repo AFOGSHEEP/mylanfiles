@@ -823,11 +823,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     var offset = part.existsSync() ? await part.length() : 0;
     debugPrint('[MLF] download ${entry.name} @offset=$offset size=${entry.size}');
     // 大文件全新下载走 4 路并行(真机基线:单流 2.7MB/s);MLF_PARALLEL=0 关闭(A/B)。
-    if (offset == 0 &&
-        entry.size >= _parallelThreshold &&
-        Platform.environment['MLF_PARALLEL'] != '0' &&
-        _client != null &&
-        _remoteBase != null) {
+    if (offset == 0 && entry.size >= _parallelThreshold && Platform.environment['MLF_PARALLEL'] != '0' && _client != null && _remoteBase != null) {
       final t0 = DateTime.now();
       try {
         await _runParallelDownload(task, entry, part);
@@ -887,8 +883,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     await _finalizePart(part, File('${inbox.path}/$safeName'));
     debugPrint(
-      '[MLF] serial done: ' + safeName + ' in ' +
-          DateTime.now().difference(t0).inMilliseconds.toString() + 'ms',
+      '[MLF] serial done: ' + safeName + ' in ' + DateTime.now().difference(t0).inMilliseconds.toString() + 'ms',
     );
   }
 
@@ -1039,7 +1034,6 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
   void _downloadMediaEntry(Map<dynamic, dynamic> entry) {
     final path = entry['path'] as String?;
     final name = entry['name'] as String? ?? 'media';
-    final size = (entry['size'] as num?)?.toInt() ?? 0;
     if (path == null) {
       return;
     }

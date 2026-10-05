@@ -165,7 +165,7 @@ class MediaService {
       final m = e.toMap()..['kind'] = _kindOf(e.name);
       final kind = m['kind'] as String;
       if ((kind == 'image' || kind == 'video') && _thumb != null) {
-        m['thumb'] = _thumb!.issueToken(e.path);
+        m['thumb'] = _thumb.issueToken(e.path);
       }
       return m;
     }).toList();

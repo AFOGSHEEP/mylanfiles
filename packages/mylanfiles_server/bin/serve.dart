@@ -33,7 +33,9 @@ Future<void> main(List<String> args) async {
       case '--no-pair':
         allowPairing = false;
       case '--help' || '-h':
-        stdout.writeln('usage: mlf-serve [--root DIR] [--alias NAME] [--port N] [--no-pair]');
+        stdout.writeln(
+          'usage: mlf-serve [--root DIR] [--alias NAME] [--port N] [--no-pair]',
+        );
         exit(0);
     }
   }
@@ -44,22 +46,31 @@ Future<void> main(List<String> args) async {
     exit(2);
   }
   // 身份目录:共享根的同级伴生目录(在根外)。
-  final rootName =
-      rootDir.path.replaceAll(Platform.isWindows ? '\\' : 'X', '/').split('/').where((s) => s.isNotEmpty).last;
-  final identityDir = Directory('${rootDir.parent.path}/$rootName-mlf-identity');
+  final rootName = rootDir.path
+      .replaceAll(Platform.isWindows ? '\\' : 'X', '/')
+      .split('/')
+      .where((s) => s.isNotEmpty)
+      .last;
+  final identityDir = Directory(
+    '${rootDir.parent.path}/$rootName-mlf-identity',
+  );
 
   final identity = await loadOrCreateIdentity(identityDir);
   final prefsFile = File('${identityDir.path}/server.json');
   Map<dynamic, dynamic> prefs = {};
   try {
     if (await prefsFile.exists()) {
-      prefs = jsonDecode(await prefsFile.readAsString()) as Map<dynamic, dynamic>;
+      prefs =
+          jsonDecode(await prefsFile.readAsString()) as Map<dynamic, dynamic>;
     }
-  } on Object {/* 损坏重来 */}
+  } on Object {
+    /* 损坏重来 */
+  }
 
   final savedPort = wantPort ?? (prefs['port'] as num?)?.toInt() ?? 0;
-  final savedPaired =
-      ((prefs['paired'] as List?) ?? const []).whereType<String>().toSet();
+  final savedPaired = ((prefs['paired'] as List?) ?? const [])
+      .whereType<String>()
+      .toSet();
 
   final serverRef = <MlfServer>[];
   final server = MlfServer(
@@ -72,7 +83,10 @@ Future<void> main(List<String> args) async {
       if (s != null) {
         unawaited(
           prefsFile.writeAsString(
-            jsonEncode({'port': s.port, 'paired': s.pairedFingerprints.toList()}),
+            jsonEncode({
+              'port': s.port,
+              'paired': s.pairedFingerprints.toList(),
+            }),
             flush: true,
           ),
         );
@@ -84,24 +98,37 @@ Future<void> main(List<String> args) async {
   var bound = false;
   if (savedPort > 0) {
     try {
-      await server.bind(InternetAddress.anyIPv4, savedPort, securityContext: identity.context);
+      await server.bind(
+        InternetAddress.anyIPv4,
+        savedPort,
+        securityContext: identity.context,
+      );
       bound = true;
     } on Object {
       stderr.writeln('端口 $savedPort 被占用,改用随机端口');
     }
   }
   if (!bound) {
-    await server.bind(InternetAddress.anyIPv4, 0, securityContext: identity.context);
+    await server.bind(
+      InternetAddress.anyIPv4,
+      0,
+      securityContext: identity.context,
+    );
   }
   await prefsFile.writeAsString(
-    jsonEncode({'port': server.port, 'paired': server.pairedFingerprints.toList()}),
+    jsonEncode({
+      'port': server.port,
+      'paired': server.pairedFingerprints.toList(),
+    }),
     flush: true,
   );
 
   final lanIp = await lanIPv4();
   final deviceAlias = (alias != null && alias.isNotEmpty)
       ? alias
-      : (Platform.localHostname.isEmpty ? 'mlf-server' : Platform.localHostname);
+      : (Platform.localHostname.isEmpty
+            ? 'mlf-server'
+            : Platform.localHostname);
   final pairing = MlfPairingInfo(
     ip: lanIp ?? '127.0.0.1',
     port: server.port,
