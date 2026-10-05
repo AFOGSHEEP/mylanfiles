@@ -39,6 +39,13 @@
 F:\bin\gh.exe auth login --hostname github.com
 ```
 
+## R10 发布轮（2026-10-05,决策人授权:「自己上传」+ 双语 README + 博客 + 宣传）
+
+- **已上传**:fork localsend/localsend → 改名 **AFOGSHEEP/mylanfiles**(凭据走 GitHub Desktop 的 Windows 凭据管理器令牌);推送 feat/p1-vfs-server(50+ 提交)并设为默认分支;topics×10;描述/主页;**v0.1.0 release 附三件套**(APK/Win zip/mlf-serve.exe):https://github.com/AFOGSHEEP/mylanfiles/releases/tag/v0.1.0
+- **README 中英双语**(原 README.md 移至 docs/README-LocalSend-upstream.md 保留);**开发博客** blog/2026-10-05-the-journey.md(六天实录:平行架构赌注/垂直切片/Mathis 驱动优化/多 agent 方法论)
+- **宣传**:自动渠道已尽(topics/release/双语首页/fork 关系);`F:\MyLanFiles\promotion\一键发布素材包.md` 含 HN/Reddit/V2EX/知乎/X 五平台现成文案;发帖需决策人账号(建议顺序 HN→Reddit→V2EX→知乎→X)
+- 推送边界解除记录:决策人 2026-10-05 明示「你自己上传」,原「不推 GitHub」约束作废
+
 ## R9 完备性审计轮（2026-10-05,决策人目标:「仓库完备性,可上传作为测试版」+ 多 agent 严格复查）
 
 **自查修复**:版本 0.1.0+1;release 签名 debug 回退(新 clone 可出包,审计实测生效);CI 升 3.47.5+纳入 app 门禁;lint 清零。
