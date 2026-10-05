@@ -39,6 +39,15 @@
 F:\bin\gh.exe auth login --hostname github.com
 ```
 
+## R9 完备性审计轮（2026-10-05,决策人目标:「仓库完备性,可上传作为测试版」+ 多 agent 严格复查）
+
+**自查修复**:版本 0.1.0+1;release 签名 debug 回退(新 clone 可出包,审计实测生效);CI 升 3.47.5+纳入 app 门禁;lint 清零。
+**三 agent 严格审计**(`F:\MyLanFilesudit\`):
+- 全新克隆构建:**READY** — git archive→pub get→format/analyze/test→编译并运行 mlf-serve→无签名配置出 release APK(签名回退验证);「本地能跑克隆跑不了」零缺失(CHANGELOG.md 符号链接为 Windows 观感小瑕疵)
+- 发布就绪:NEEDS-FIX→已修 — write 回执 sha256 测试断言(卫生审计同发现)、上游 ci.yml packaging 加 fork 守卫、README 计数、NOTICE(Apache §4(b))、包 license 字段、mlf-serve 版本输出;机密扫描零命中
+- git 卫生:NEEDS-CLEANUP→已修 4/4 — .gitattributes 行尾规范化、噪音文件确认已与上游一致、Gradle/Kotlin 升级理由引用 R-011;**遗留:仅 upstream 远端无 origin(推送待决策人 gh auth)**
+最终门禁:format 0 改动 + analyze 0 error + **101 测试全绿**;工作树干净。
+
 ## R8 Demo 轮（2026-10-05,决策人目标:「多端部署、初步功能的初版 demo」）
 
 **交付物 `F:\MyLanFiles\demo\`**:①`MyLanFiles-android-v0.1.0.apk`(签名 release,146MB);②`localsend-app-win64-v0.1.0.zip`(release,解压即用);③`mlf-serve.exe`(**无头服务器单二进制 10.4MB**,`--root/--alias/--port/--no-pair`,身份在共享根外,端口持久,自动发现);④快速开始 README。
