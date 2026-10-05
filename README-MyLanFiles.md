@@ -78,4 +78,4 @@ GET  /api/v1/thumb?token=&size=   POST /api/v1/pack          {items, skip} → �
 
 ## 许可
 
-遵循上游 LocalSend 的许可证(agpl-3.0,见 LICENSE);自研包同样 AGPL-3.0。
+遵循上游 LocalSend 的许可证(Apache-2.0,见 LICENSE);自研包同样 Apache-2.0。
