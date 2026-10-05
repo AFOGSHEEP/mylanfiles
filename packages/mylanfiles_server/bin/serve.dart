@@ -143,6 +143,7 @@ Future<void> main(List<String> args) async {
   );
   await announcer.start();
 
+  stdout.writeln('[mlf-serve] version= 0.1.0');
   stdout.writeln('[mlf-serve] root   = ${rootDir.path}');
   stdout.writeln('[mlf-serve] https  = https://$lanIp:${server.port}');
   stdout.writeln('[mlf-serve] alias  = $deviceAlias');

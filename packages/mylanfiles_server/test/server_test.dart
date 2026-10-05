@@ -201,25 +201,38 @@ void main() {
     });
   });
 
-  test('fs/write receipt carries sha256 of the written bytes (integrity guard)', () async {
-    final payload = utf8.encode('完整性回执测试 payload 123');
-    final expected = sha256.convert(payload).toString();
-    final req = _authed('PUT', '/api/v1/fs/write', query: {'path': 'receipt.bin'})
-      ..bodyBytes = payload;
-    final res = await client.send(req);
-    expect(res.statusCode, 200);
-    final body = jsonDecode(await res.stream.bytesToString()) as Map;
-    expect(body['size'], payload.length);
-    expect(body['sha256'], expected, reason: 'receipt hash must equal client-side hash');
+  test(
+    'fs/write receipt carries sha256 of the written bytes (integrity guard)',
+    () async {
+      final payload = utf8.encode('完整性回执测试 payload 123');
+      final expected = sha256.convert(payload).toString();
+      final req = _authed(
+        'PUT',
+        '/api/v1/fs/write',
+        query: {'path': 'receipt.bin'},
+      )..bodyBytes = payload;
+      final res = await client.send(req);
+      expect(res.statusCode, 200);
+      final body = jsonDecode(await res.stream.bytesToString()) as Map;
+      expect(body['size'], payload.length);
+      expect(
+        body['sha256'],
+        expected,
+        reason: 'receipt hash must equal client-side hash',
+      );
 
-    // 覆盖写(同 path 不同内容)回执随之变化。
-    final payload2 = utf8.encode('different');
-    final req2 = _authed('PUT', '/api/v1/fs/write', query: {'path': 'receipt.bin'})
-      ..bodyBytes = payload2;
-    final res2 = await client.send(req2);
-    final body2 = jsonDecode(await res2.stream.bytesToString()) as Map;
-    expect(body2['sha256'], sha256.convert(payload2).toString());
-  });
+      // 覆盖写(同 path 不同内容)回执随之变化。
+      final payload2 = utf8.encode('different');
+      final req2 = _authed(
+        'PUT',
+        '/api/v1/fs/write',
+        query: {'path': 'receipt.bin'},
+      )..bodyBytes = payload2;
+      final res2 = await client.send(req2);
+      final body2 = jsonDecode(await res2.stream.bytesToString()) as Map;
+      expect(body2['sha256'], sha256.convert(payload2).toString());
+    },
+  );
 
   group('fs endpoints (E2E)', () {
     test('list returns entries JSON', () async {

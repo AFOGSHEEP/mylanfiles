@@ -67,7 +67,7 @@ GET  /api/v1/thumb?token=&size=   POST /api/v1/pack          {items, skip} → �
 ## 状态与质量
 
 - 真机双向矩阵全绿(Xiaomi/Android 15 ↔ Windows 11,真实 Wi-Fi,sha256 全量校验)
-- 单元/集成测试:core 49 + server 41 + app 10 = **100 全绿**
+- 单元/集成测试:core 49 + server 42 + app 10 = **101 全绿**
 - 三轮独立 agent 对抗测试(协议健壮性/路径安全/限速语义),发现的问题全部修复并带回归测试
 - 性能实测:64MB 并行 11.2MB/s(串行 5.0);打包流 vs 逐文件 2.95×;缩略图 0.46s/张
 

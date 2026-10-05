@@ -3,6 +3,7 @@ description: >-
   MyLanFiles embedded HTTP(S) server and its protocol peer client (pinning,
   pairing, packed stream). Depends on mylanfiles_core.
 publish_to: none
+license: Apache-2.0
 environment:
   sdk: ^3.11.0
 resolution: workspace
