@@ -594,9 +594,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     final listener = DiscoveryListener(
       onChanged: (servers) {
-        debugPrint(
-          '[MLF] discovered: ' + servers.map((d) => d.alias + '@' + d.ip).join(', '),
-        );
+        // 发现日志带完整配对 JSON:对端是 release 构建(logcat 无输出)时,
+        // PC 侧仍可从此行拿到 fp/port 完成无头对接。
+        for (final d in servers) {
+          debugPrint('[MLF] discovered: ' + d.pairingJson);
+        }
         if (mounted) {
           setState(() => _discovered = servers);
         }
