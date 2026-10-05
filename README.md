@@ -1,305 +1,122 @@
-# LocalSend
+# MyLanFiles
 
-[![CI status][ci-badge]][ci-workflow]
-[![Translations][translate-badge]][translate-link]
-[![Packaging status][packaging-badge]][packaging-link]
+**Browse and move files between your phone and computer over your own Wi-Fi — no account, no cloud, no internet.**
 
-[ci-badge]: https://github.com/localsend/localsend/actions/workflows/ci.yml/badge.svg
-[ci-workflow]: https://github.com/localsend/localsend/actions/workflows/ci.yml
-[translate-badge]: https://hosted.weblate.org/widget/localsend/app/svg-badge.svg
-[translate-link]: https://hosted.weblate.org/engage/localsend/
-[packaging-badge]: https://repology.org/badge/tiny-repos/localsend.svg
-[packaging-link]: https://repology.org/project/localsend/versions
+[English](#english) · [中文](#中文)
 
-[Homepage][homepage] • [Discord][discord] • [GitHub][github] • [Codeberg][codeberg]
+---
 
-[English (Default)](README.md) • [中文](/support/readme/README_ZH.md)
+## English
 
-[homepage]: https://localsend.org
-[discord]: https://discord.gg/GSRWmQNP87
-[github]: https://github.com/localsend/localsend
-[codeberg]: https://codeberg.org/localsend/localsend
+MyLanFiles turns every device on your LAN into both a server and a client: open the app on two machines and they find each other automatically (UDP broadcast), pair with a single tap (self-signed TLS with certificate fingerprint pinning), and then you can browse the other side's file tree and photo albums, and transfer in both directions with resumable, verified, multi-stream transfers.
 
-LocalSend is a free, open-source app that allows you to securely share files and messages with nearby devices over your local network without needing an internet connection.
+Built as a fork of [LocalSend](https://github.com/localsend/localsend) — keeping its polished shell and its device-to-device sharing, while adding a parallel pure-Dart protocol stack (see [docs/adr/0002](docs/adr/0002-dart-packages-parallel-to-upstream-rust.md)) for browsing, albums and high-speed transfer.
 
-- [About](#about)
-- [Sponsors](#sponsors)
-- [Screenshots](#screenshots)
-- [Download](#download)
-- [How It Works](#how-it-works)
-- [Dependency Hierarchy](#dependency-hierarchy)
-- [Getting Started](#getting-started)
-- [Command Line Interface](#command-line-interface)
-- [Contributing](#contributing)
-  - [Translation](#translation)
-  - [Bug Fixes and Improvements](#bug-fixes-and-improvements)
-- [Troubleshooting](#troubleshooting)
-- [Building](#building)
-  - [Android](#android)
-  - [iOS](#ios)
-  - [macOS](#macos)
-  - [Windows](#windows)
-  - [Linux](#linux)
+### Features (v0.1.0)
 
-## About
+- **Zero-configuration discovery** — devices announce themselves on the LAN; tap "nearby device" to connect. No QR gymnastics required for everyday use.
+- **Security that doesn't get in the way** — self-signed TLS, fingerprint pinned at pairing (same trust model as scanning a QR); identity/port/pairings persist, so restarts reconnect silently; two-tier rate limiting keeps brute-force out without ever locking the scan-to-recover path.
+- **Browse** — full virtual-path file tree (host layout never leaks) plus a photo-album grid with server-rendered thumbnails (random unguessable tokens).
+- **Fast downloads** — files ≥8 MB automatically split into 4 parallel range streams (measured 2.25× on real Wi-Fi); smaller batches go through a packed stream with content-addressed skip (only missing files travel); everything resumable at file or byte level.
+- **Verified uploads** — the server returns a streaming sha256 receipt; the client compares and deletes on mismatch. Atomic landing via staged `.mlfpart` + rename.
+- **Headless server** — `mlf-serve`, a single ~10 MB binary, turns any directory on any machine (NAS/Linux/Windows/macOS) into a discoverable share.
 
-LocalSend is a cross-platform app that enables secure communication between devices using a REST API and HTTPS encryption. Unlike other messaging apps that rely on external servers, LocalSend doesn't require an internet connection or third-party servers, making it a fast and reliable solution for local communication.
+### Quick start
 
-## Sponsors
+Grab the demo kit (Android APK / Windows portable zip / mlf-serve) from the [v0.1.0 release](../../releases), or build from source:
 
-Browser testing via
-
-<a href="https://www.testmuai.com/?utm_medium=sponsor&utm_source=localsend" target="_blank">
-    <img src="https://localsend.org/img/sponsors/tesmu.svg" style="vertical-align: middle;" width="250" height="45" />
-</a>
-
-## Screenshots
-
-<img src="https://localsend.org/img/screenshot-iphone.webp" alt="iPhone screenshot" height="300"/> <img src="https://localsend.org/img/screenshot-pc.webp" alt="PC screenshot" height="300"/>
-
-## Download
-
-[![Packaging status](https://repology.org/badge/tiny-repos/localsend.svg)](https://repology.org/project/localsend/versions)
-
-It is recommended to download the app either from an app store or from a package manager because the app does not have an auto-update.
-
-| Windows                 | macOS                   | Linux              | Android        | iOS           | Fire OS    |
-|-------------------------|-------------------------|--------------------|----------------|---------------|------------|
-| [Winget][]              | [App Store][]           | [Flathub][]        | [Play Store][] | [App Store][] | [Amazon][] |
-| [Scoop][]               | [Homebrew][]            | [Nixpkgs][]        | [F-Droid][]    |               |            |
-| [Chocolatey][]          | [DMG Installer][latest] | [Snap][]           | [APK][latest]  |               |            |
-| [EXE Installer][latest] |                         | [AUR][]            |                |               |            |
-| [Portable ZIP][latest]  |                         | [TAR][latest]      |                |               |            |
-|                         |                         | [DEB][latest]      |                |               |            |
-|                         |                         | [AppImage][latest] |                |               |            |
-
-Read more about [distribution channels][].
-
-Windows binaries are signed. Read more about the [Code signing policy][].
-
-> [!CAUTION]
-> **Unofficial MSIX preview:** you can try builds from the latest commits at [localsend.ob-buff.dev](https://localsend.ob-buff.dev/). Stability is not guaranteed and all custom code tweaks are listed on that site.
-
-[windows store]: https://www.microsoft.com/store/apps/9NCB4Z0TZ6RR
-[app store]: https://apps.apple.com/us/app/localsend/id1661733229
-[play store]: https://play.google.com/store/apps/details?id=org.localsend.localsend_app
-[f-droid]: https://f-droid.org/packages/org.localsend.localsend_app
-[amazon]: https://www.amazon.com/dp/B0BW6MP732
-[winget]: https://github.com/microsoft/winget-pkgs/tree/master/manifests/l/LocalSend/LocalSend
-[scoop]: https://scoop.sh/#/apps?s=0&d=1&o=true&q=localsend&id=fb88113be361ca32c0dcac423cb4afdeda0b0c66
-[chocolatey]: https://community.chocolatey.org/packages/localsend
-[homebrew]: https://formulae.brew.sh/cask/localsend
-[flathub]: https://flathub.org/apps/details/org.localsend.localsend_app
-[nixpkgs]: https://search.nixos.org/packages?show=localsend
-[snap]: https://snapcraft.io/localsend
-[aur]: https://aur.archlinux.org/packages/localsend-bin
-[latest]: https://github.com/localsend/localsend/releases/latest
-[distribution channels]: https://github.com/localsend/localsend/blob/main/CONTRIBUTING.md#distribution
-[code signing policy]: https://github.com/localsend/localsend/blob/main/CODE_SIGNING.md
-
-**Compatibility**
-
-| Platform | Minimum Version | Note                                                                                                                        |
-|----------|-----------------|-----------------------------------------------------------------------------------------------------------------------------|
-| Android  | 7.0             | The last version to support Android 5 and 6 is v1.17.0.                                                                     |
-| iOS      | 13.0            | The last version to support iOS 12 is v1.17.0.                                                                              |
-| macOS    | 11 Big Sur      | Use OpenCore Legacy Patcher 2.0.2 (See [#1005](https://github.com/localsend/localsend/issues/1005#issuecomment-2449899384)) |
-| Windows  | 10              | The last version to support Windows 7 is v1.15.4.   |
-| Linux    | N.A.            | Deps: Gnome: `xdg-desktop-portal` and `xdg-desktop-portal-gtk`, KDE: `xdg-desktop-portal` and `xdg-desktop-portal-kde`      |
-
-## Setup
-
-In most cases, LocalSend should work out of the box. However, if you are having trouble sending or receiving files, you may need to configure your firewall to allow LocalSend to communicate over your local network.
-
-| Traffic Type | Protocol | Port  | Action |
-|--------------|----------|-------|--------|
-| Incoming     | TCP, UDP | 53317 | Allow  |
-| Outgoing     | TCP, UDP | Any   | Allow  |
-
-On Linux, for example with `ufw`: `sudo ufw allow 53317`. With `firewalld`: `sudo firewall-cmd --permanent --add-port=53317/tcp`, `sudo firewall-cmd --permanent --add-port=53317/udp`, then `sudo firewall-cmd --reload`.
-
-Also make sure to disable AP isolation on your router. It should be usually disabled by default but some routers may have it enabled (especially guest networks).
-See [troubleshooting](#troubleshooting) for more information.
-
-**Portable Mode**
-
-(Introduced in v1.13.0)
-
-Create a file named `settings.json` located in the same directory as the executable.
-This file can be empty.
-The app will use this file to store settings instead of the default location.
-
-**Start hidden**
-
-(Updated in v1.15.0)
-
-To start the app hidden (only in tray), use the `--hidden` flag (example: `localsend_app.exe --hidden`).
-
-On v1.14.0 and earlier, the app starts hidden if `autostart` flag is set, and the hidden setting is enabled.
-
-## How It Works
-
-LocalSend uses a secure communication protocol that allows devices to communicate with each other using a REST API. All data is sent securely over HTTPS, and the TLS/SSL certificate is generated on the fly on each device, ensuring maximum security.
-
-For more information on the LocalSend Protocol, see the [documentation](https://github.com/localsend/protocol).
-
-## Dependency Hierarchy
-
-![Dependency hierarchy](support/docs/dependency-hierarchy.svg)
-
-## Getting Started
-
-To compile LocalSend from the source code, follow these steps:
-
-1. Install Flutter [directly](https://flutter.dev) or using [fvm](https://fvm.app) (see [version required](.fvmrc))
-2. Install [Rust](https://www.rust-lang.org/tools/install)
-3. Clone the `LocalSend` repository
-4. Run `cd app` to enter the app directory
-5. Run `flutter pub get` to download dependencies
-6. Run `flutter run` to start the app
-
-> [!NOTE]
-> LocalSend currently requires an older Flutter version (specified in [.fvmrc](.fvmrc))
-> and thus build issues may be caused by a mismatch between the required and the (system-wide) installed Flutter version.  
-> To make development more consistent, LocalSend uses [fvm](https://fvm.app) to manage the project Flutter version.
-> After installing `fvm`, run `fvm flutter` instead of `flutter`.
-
-## Command Line Interface
-
-The LocalSend CLI is a terminal client built on LocalSend Protocol v2.
-Run `localsend-cli --help` to see every available option and hotkey.
-
-Use the `send` command with one or more files, directories, or a mixture of both:
-
-```shell
-localsend-cli send report.pdf photo.jpg ./project-backup
+```sh
+cd app && flutter build apk --release      # Android (needs android/key.properties, falls back to debug signing if absent)
+cd app && flutter build windows --release  # Windows
+cd packages/mylanfiles_server && dart compile exe bin/serve.dart -o mlf-serve   # headless server, any desktop OS
 ```
 
-The command opens the discovered-device list; select the destination interactively
-and press Enter to start the transfer.
+### Architecture
 
-To select the destination without an interactive device list, pass its exact alias
-or IP address:
-
-```shell
-localsend-cli send --to "Cute Tomato" report.pdf
-localsend-cli send --to 192.168.27.26 report.pdf
+```
+repo/
+├─ app/                    # Flutter app (LocalSend shell + MyLanFiles pages)
+├─ packages/
+│  ├─ mylanfiles_core/     # pure Dart: VFS, PathGuard (path-safety lifeline),
+│  │                       #   packed-stream codec, UDP discovery
+│  └─ mylanfiles_server/   # pure Dart: shelf + self-signed TLS, all §4.1
+│                          #   endpoints, thumbnails, dual rate limiters,
+│                          #   MlfClient (protocol peer), bin/serve.dart
+└─ docs/                   # protocol, decisions, risks, research notes
 ```
 
-An alias must uniquely identify a discovered device. An IP address is probed directly
-over HTTPS on LocalSend's default port (`53317`).
+Protocol summary (§4.1): self-signed HTTPS + `x-mlf-fingerprint` header; unpaired requests get 403 with rate limiting. `/` in any path means the *share root* — host paths are never addressable, so traversal is structurally impossible (three adversarial test rounds).
 
-Directories are collected recursively. Their selected root names and nested paths
-are preserved on the receiver. Empty directories are not sent because LocalSend
-transfers file entries rather than directory entries.
+### Quality
 
-## Contributing
+- 101 unit/integration tests green; full matrix verified on real devices (Android 15 ↔ Windows 11 over real Wi-Fi, sha256-verified end to end)
+- Three independent adversarial test rounds (protocol robustness, path security, rate-limit semantics) — every finding fixed with regression tests
+- Measured: 64 MB parallel download 11.2 MB/s (serial 5.0, 2.25×); packed stream 2.95× vs per-file; thumbnails 0.46 s each
+- Development write-up: [blog/2026-10-05-the-journey.md](blog/2026-10-05-the-journey.md)
 
-We welcome contributions from anyone interested in helping improve LocalSend. If you'd like to contribute, there are a few ways to get involved:
+### Roadmap
 
-### Translation
+Proper release signing & APK size split, iOS/macOS/Linux official builds, i18n via upstream translations, HEIC thumbnails, native thumbnail decoding (10×+), block-level incremental sync (FastCDC, researched), FTS5 search, QUIC transport.
 
-You can help translate LocalSend into other languages. We use the [Weblate](https://hosted.weblate.org/projects/localsend/app) platform to manage translations.
+### License
 
-Alternatively, you can also contribute by forking this repository and adding translations manually.
+Apache-2.0 (inherited from LocalSend, see LICENSE and NOTICE).
 
-The translations are located in the [app/assets/i18n](https://github.com/localsend/localsend/tree/main/app/assets/i18n) directory. Edit the `_missing_translations_<locale>.json` or `strings_<locale>.i18n.json` file to add or update translations.
+---
 
-<a href="https://hosted.weblate.org/engage/localsend/">
-<img src="https://hosted.weblate.org/widget/localsend/app/multi-auto.svg" alt="Translation status" />
-</a>
+## 中文
 
-**_Take note:_ Fields decorated with `@` are not meant to be translated; they are not used in the app in any way, being merely informative text about the file or to give context to the translator.**
+**在你自己的 Wi-Fi 里,手机和电脑互相浏览、互相传文件——无需账号、无需云端、不联网。**
 
-### Bug Fixes and Improvements
+MyLanFiles 让局域网里的每台设备既是服务端又是客户端:两台机器各打开应用,自动互相发现(UDP 广播),点一下「附近设备」即完成配对(自签 TLS + 证书指纹钉住),然后浏览对端的文件树与相册,双向传输,断点续传,全程校验。
 
-- **Bug Fixes:** If you find a bug, please create a pull request with a clear description of the issue and how to fix it.
-- **Improvements:** Have an idea for how to improve LocalSend? Please create an issue first to discuss why the improvement is needed.
+基于 [LocalSend](https://github.com/localsend/localsend) fork——保留其成熟的壳与设备互传能力,新增一套平行的纯 Dart 协议栈(见 [docs/adr/0002](docs/adr/0002-dart-packages-parallel-to-upstream-rust.md))承担浏览、相册与高速传输。
 
-For more information, see the [contributing guide](https://github.com/localsend/localsend/blob/main/CONTRIBUTING.md).
+### 功能(v0.1.0)
 
-## Troubleshooting
+- **零配置发现**:设备在局域网自动宣告,点「附近设备」直连,日常使用无需扫码贴 JSON
+- **不添乱的安全**:自签 TLS、配对即指纹钉住(与扫码同一信任模型);身份/端口/配对持久化,重启静默重连;双限速器防爆破,但扫码恢复路径永不锁死
+- **浏览**:虚拟路径文件树(不泄露主机盘符)+ 相册缩略图网格(服务端随机 token,结构性防枚举)
+- **高速下载**:≥8MB 自动 4 路并行分块(真机实测 2.25×);小文件批量走打包流 + 内容寻址 skip(只传缺失);文件级/字节级断点续传
+- **可校验上传**:服务端流式 sha256 回执,客户端比对不符即删;`.mlfpart` 暂存 + 原子改名落盘
+- **无头服务器** `mlf-serve`:约 10MB 单二进制,把任意机器(NAS/Linux/Windows/macOS)的任意目录变成可发现的共享端
 
-| Issue              | Platform (Sending) | Platform (Receiving) | Solution                                                                                                                                |
-|--------------------|--------------------|----------------------|-----------------------------------------------------------------------------------------------------------------------------------------|
-| Device not visible | Any                | Any                  | Make sure to disable AP-Isolation on your router. If it is enabled, connections between devices are forbidden.                          |
-| Device not visible | Any                | Windows              | Make sure to configure your network as a "private" network. Windows might be more restrictive when the network is configured as public. |
-| Device not visible | macOS, iOS         | Any                  | You can try to toggle the "Local Network" permission under "Privacy" in the OS settings.                                                |
-| Device not visible | Any                | Any                  | If a VPN is active, allow local/LAN traffic or temporarily disable the VPN. Some VPNs block local network connections by default.       |
-| Device not visible | Any                | Any                  | Use manual sending to enter the receiver's IP address directly. If that works, add the device to favorites so it is probed directly.    |
-| Speed too slow     | Any                | Any                  | Use 5 Ghz; Disable encryption on both devices                                                                                           |
-| Speed too slow     | Any                | Android              | Known issue. https://github.com/flutter-cavalry/saf_stream/issues/4                                                                     |
+### 快速开始
 
-## Building
+从 [v0.1.0 release](../../releases) 下载演示三件套(Android APK / Windows 免安装包 / mlf-serve),或源码构建:
 
-These commands are intended for maintainers only. Make sure to run them from the `app` directory.
-
-### Android
-
-Traditional APK
-
-```bash
-flutter build apk
+```sh
+cd app && flutter build apk --release      # Android(需 android/key.properties,缺失时回退 debug 签名)
+cd app && flutter build windows --release  # Windows
+cd packages/mylanfiles_server && dart compile exe bin/serve.dart -o mlf-serve   # 无头服务器
 ```
 
-AppBundle for Google Play
+### 架构
 
-```bash
-flutter build appbundle
+```
+repo/
+├─ app/                    # Flutter 应用(LocalSend 壳 + MyLanFiles 页面)
+├─ packages/
+│  ├─ mylanfiles_core/     # 纯 Dart:VFS、PathGuard(路径安全生命线)、
+│  │                       #   打包流编解码、UDP 发现
+│  └─ mylanfiles_server/   # 纯 Dart:shelf + 自签 TLS、§4.1 全端点、缩略图、
+│                          #   双限速器、MlfClient(协议对端)、bin/serve.dart
+└─ docs/                   # 协议、决策、风险、研究笔记
 ```
 
-### iOS
+协议摘要(§4.1):自签 HTTPS + `x-mlf-fingerprint` 指纹头;未配对请求 403 且限速。路径中的 `/` 一律指**共享根**——主机路径不可寻址,穿越被结构性排除(经三轮对抗测试)。
 
-```bash
-flutter build ipa
-```
+### 质量
 
-### macOS
+- 101 个单元/集成测试全绿;真机全矩阵验证(Android 15 ↔ Windows 11,真实 Wi-Fi,端到端 sha256 校验)
+- 三轮独立对抗测试(协议健壮性/路径安全/限速语义),发现项全部修复并带回归测试
+- 实测:64MB 并行下载 11.2MB/s(串行 5.0,2.25×);打包流对逐文件 2.95×;缩略图 0.46 秒/张
+- 开发全程记录:[blog/2026-10-05-the-journey.md](blog/2026-10-05-the-journey.md)
 
-```bash
-flutter build macos
-```
+### 路线图
 
-### Windows
+正式签名与 APK 体积拆分、iOS/macOS/Linux 官方构建、i18n 接入上游翻译、HEIC 缩略图、原生解码缩略图(10×+)、块级增量同步(FastCDC,已调研)、FTS5 搜索、QUIC 传输。
 
-**Traditional**
+### 许可
 
-```bash
-flutter build windows
-```
-
-**Local MSIX App**
-
-```bash
-flutter pub run msix:create
-```
-
-**Store ready**
-
-```bash
-flutter pub run msix:create --store
-```
-
-### Linux
-
-**Traditional**
-
-```bash
-flutter build linux
-```
-
-**AppImage**
-
-```bash
-appimage-builder --recipe AppImageBuilder.yml
-```
-
-**Snap**
-
-Instructions in [localsend/snap/README.md](https://github.com/localsend/snap/blob/main/README.md)
-
-## Contributors
-
-<a href="https://github.com/localsend/localsend/graphs/contributors">
-  <img src="https://contrib.rocks/image?repo=localsend/localsend"  alt="Localsend Contributors"/>
-</a>
+Apache-2.0(继承自 LocalSend,见 LICENSE 与 NOTICE)。
