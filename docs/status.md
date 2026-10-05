@@ -45,6 +45,7 @@ F:\bin\gh.exe auth login --hostname github.com
 - **README 中英双语**(原 README.md 移至 docs/README-LocalSend-upstream.md 保留);**开发博客** blog/2026-10-05-the-journey.md(六天实录:平行架构赌注/垂直切片/Mathis 驱动优化/多 agent 方法论)
 - **宣传**:自动渠道已尽(topics/release/双语首页/fork 关系);`F:\MyLanFiles\promotion\一键发布素材包.md` 含 HN/Reddit/V2EX/知乎/X 五平台现成文案;发帖需决策人账号(建议顺序 HN→Reddit→V2EX→知乎→X)
 - 推送边界解除记录:决策人 2026-10-05 明示「你自己上传」,原「不推 GitHub」约束作废
+- **release APK 真机闭环补完**(同日):MIUI 安装弹窗自动化(uiautomator dump→解析按钮 bounds→input tap 轮询;首次失败因按钮倒计时禁用态,持续轮询后命中)→ 装机+appops 授权 → release app(AOT/R8/无日志)自动开服务+宣告 → PC 发现新指纹 dabd99e7…→ 配对→打包下载 3 文件 sha 全等。**root 需求评估:不需要且不做**(解锁 bootloader 会清数据;安装弹窗已被 UI 自动化解决)
 
 ## R9 完备性审计轮（2026-10-05,决策人目标:「仓库完备性,可上传作为测试版」+ 多 agent 严格复查）
 
