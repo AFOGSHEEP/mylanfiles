@@ -1,10 +1,7 @@
-import 'dart:async';
-import 'dart:convert';
-import 'dart:io';
-
 import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:localsend_app/gen/strings.g.dart';
 import 'package:localsend_app/pages/mylanfiles/photo_grid.dart';
 import 'package:localsend_app/pages/mylanfiles/qr_scan_page.dart';
 import 'package:localsend_app/pages/mylanfiles/transfer_queue.dart';
@@ -14,13 +11,19 @@ import 'package:path_provider/path_provider.dart';
 import 'package:permission_handler/permission_handler.dart';
 import 'package:pretty_qr_code/pretty_qr_code.dart';
 
+
+import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
+
 /// MyLanFiles 浏览页（P1 垂直切片 3）：
 /// - 「本机服务」：持久化自签 TLS 身份 + LAN 地址 + 二维码配对（§4.1 pair）
 /// - 「连接远程」：粘贴二维码内容（JSON）→ 指纹 pin 握手 → 配对 → 浏览
 /// - 「传输」：多选 → 自适应打包流（§4.2 中位 <2MiB）/ 逐文件 Range 续传，
 ///   队列串行执行 + 进度 UI；skip 断点续传（内容寻址，重传只补缺）
 ///
-/// 有意不依赖上游 provider/i18n（fork 卫生，ADR-0002）；QR 用上游同一
+/// 不依赖上游 provider（fork 卫生，ADR-0002）；文案走上游 i18n 的 mlf
+/// 命名空间（R8 起）；QR 用上游同一
 /// 组件 pretty_qr_code 自建弹窗，不引入对上游 UI 外壳的依赖。
 class MyLanFilesBrowsePage extends StatefulWidget {
   const MyLanFilesBrowsePage({super.key});
@@ -431,10 +434,10 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       } on Object {
         /* fallthrough */
       }
-      return 'Android 设备';
+      return t.mlf.androidDevice;
     }
     final h = Platform.localHostname;
-    return h.isEmpty ? '本机' : h;
+    return h.isEmpty ? t.mlf.thisDevice : h;
   }
 
   // ---- 本机服务（TLS + QR 配对）----
@@ -506,7 +509,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       _startAnnouncer();
       setState(() {});
     } on Object catch (e) {
-      setState(() => _error = '服务启动失败: $e');
+      setState(() => _error = t.mlf.errServerStart(error: e.toString()));
     } finally {
       setState(() => _busy = false);
     }
@@ -525,7 +528,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     await showDialog<void>(
       context: context,
       builder: (context) => AlertDialog(
-        title: const Text('扫码 / 粘贴配对'),
+        title: Text(t.mlf.scanPair),
         content: SizedBox(
           width: 280,
           child: Column(
@@ -552,7 +555,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               ),
               const SizedBox(height: 4),
               SelectableText(
-                '指纹 ${info.fingerprint.substring(0, 16)}…',
+                t.mlf.fingerprintShort(fp: info.fingerprint.substring(0, 16)),
                 style: Theme.of(context).textTheme.bodySmall,
               ),
               const SizedBox(height: 8),
@@ -572,14 +575,14 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               if (context.mounted) {
                 ScaffoldMessenger.of(
                   context,
-                ).showSnackBar(const SnackBar(content: Text('配对信息已复制')));
+                ).showSnackBar(SnackBar(content: Text(t.mlf.pairingCopied)));
               }
             },
-            child: const Text('复制配对信息'),
+            child: Text(t.mlf.copyPairing),
           ),
           TextButton(
             onPressed: () => Navigator.of(context).pop(),
-            child: const Text('关闭'),
+            child: Text(t.mlf.close),
           ),
         ],
       ),
@@ -650,11 +653,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     try {
       info = MlfPairingInfo.parse(raw);
     } on FormatException catch (e) {
-      setState(() => _error = '配对信息格式错误: $e');
+      setState(() => _error = t.mlf.errPairFormat(error: e.toString()));
       return;
     }
     if (!info.hasFingerprint) {
-      setState(() => _error = '缺少证书指纹——请粘贴完整二维码内容（JSON）');
+      setState(() => _error = t.mlf.errNoFingerprint);
       return;
     }
     setState(() {
@@ -681,7 +684,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     } on Object catch (e) {
       debugPrint('[MLF] connect FAILED: $e');
       _remoteBase = null;
-      setState(() => _error = '连接失败（指纹不匹配或不可达）: $e');
+      setState(() => _error = t.mlf.errConnect(error: e.toString()));
     } finally {
       setState(() => _busy = false);
     }
@@ -851,7 +854,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       return;
     }
     if (offset > 0) {
-      task.setDetail('断点续传：从 ${formatBytes(offset)} 处继续');
+      task.setDetail(t.mlf.resumeFrom(offset: formatBytes(offset)));
       task.receivedBytes = offset;
     }
     final t0 = DateTime.now();
@@ -876,7 +879,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       if (e.message.contains('400') && offset > 0) {
         await part.delete();
         task.receivedBytes = 0;
-        task.setDetail('远端文件已变化，重新下载');
+        task.setDetail(t.mlf.remoteChanged);
         return _runDownload(task, entry);
       }
       rethrow;
@@ -910,11 +913,11 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     }
     final totalBytes = files.fold(0, (a, f) => a + f.size) - skippedBytes;
     final task = TransferTask(
-      label: '打包 ${files.length} 个文件',
+      label: t.mlf.packLabel(count: files.length),
       kind: TransferKind.pack,
       totalBytes: totalBytes,
       runner: (task) => _withReauth(() => _runPack(task, files, skip)),
-    )..setDetail('新增 ${formatBytes(totalBytes)} · 已有跳过 ${formatBytes(skippedBytes)}');
+    )..setDetail(t.mlf.packDetail(added: formatBytes(totalBytes), skipped: formatBytes(skippedBytes)));
     _queue.enqueue(task);
   }
 
@@ -934,7 +937,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         if (frame == null) {
           break;
         }
-        task.setDetail('正在 ${frame.name}');
+        task.setDetail(t.mlf.transferItem(name: frame.name));
         debugPrint('[MLF] frame: ${frame.name} ${frame.size}B');
         final target = File('${inbox.path}/${sanitizeFilename(frame.name)}');
         final sink = target.openWrite();
@@ -959,7 +962,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
         final sha = await sha256FileHex(target);
         if (sha != frame.shaHex) {
           await target.delete();
-          throw MlfClientException('${frame.name} 校验失败（传输损坏）');
+          throw MlfClientException(t.mlf.verifyFailed(name: frame.name));
         }
         received++;
       }
@@ -967,7 +970,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       // 提前退出（取消/错误）也关闭底层连接，避免泄漏。
       await reader.cancel();
     }
-    task.setDetail('新增 $received 个 · 跳过 ${files.length - received} 个已存在');
+    task.setDetail(t.mlf.packDone(received: received, skipped: files.length - received));
     debugPrint('[MLF] pack done: +$received skipped=${files.length - received}');
   }
 
@@ -1072,7 +1075,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     final selectedFiles = _entries.where((e) => !e.isDir && _selected.contains(e.path)).toList();
     if (_busy) {
       return Scaffold(
-        appBar: AppBar(title: const Text('MyLanFiles 浏览')),
+        appBar: AppBar(title: Text(t.mlf.browseTitle)),
         body: const Center(child: CircularProgressIndicator()),
       );
     }
@@ -1080,7 +1083,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       return Scaffold(
         appBar: AppBar(
           title: Text(
-            '相册 · ' + (_servers.where((s) => s.fp == _pinnedFp).map((s) => s.alias).firstOrNull ?? '对端'),
+            t.mlf.photosWith(name: _servers.where((s) => s.fp == _pinnedFp).map((s) => s.alias).firstOrNull ?? t.mlf.peer),
           ),
         ),
         body: Column(
@@ -1090,9 +1093,9 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               child: Row(
                 children: [
                   SegmentedButton<bool>(
-                    segments: const [
-                      ButtonSegment(value: false, label: Text('文件'), icon: Icon(Icons.folder_outlined)),
-                      ButtonSegment(value: true, label: Text('相册'), icon: Icon(Icons.photo_library_outlined)),
+                    segments: [
+                      ButtonSegment(value: false, label: Text(t.mlf.files), icon: Icon(Icons.folder_outlined)),
+                      ButtonSegment(value: true, label: Text(t.mlf.photos), icon: Icon(Icons.photo_library_outlined)),
                     ],
                     selected: const {true},
                     onSelectionChanged: (sel) => setState(() => _photosMode = sel.first),
@@ -1100,7 +1103,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                   const Spacer(),
                   IconButton(
                     icon: const Icon(Icons.refresh),
-                    tooltip: '刷新',
+                    tooltip: t.mlf.refresh,
                     onPressed: () => setState(() {}),
                   ),
                 ],
@@ -1124,7 +1127,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       );
     }
     return Scaffold(
-      appBar: AppBar(title: const Text('MyLanFiles 浏览')),
+      appBar: AppBar(title: Text(t.mlf.browseTitle)),
       body: _busy
           ? const Center(child: CircularProgressIndicator())
           : ListView(
@@ -1155,9 +1158,9 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                     child: Align(
                       alignment: Alignment.centerLeft,
                       child: SegmentedButton<bool>(
-                        segments: const [
-                          ButtonSegment(value: false, label: Text('文件'), icon: Icon(Icons.folder_outlined)),
-                          ButtonSegment(value: true, label: Text('相册'), icon: Icon(Icons.photo_library_outlined)),
+                        segments: [
+                          ButtonSegment(value: false, label: Text(t.mlf.files), icon: Icon(Icons.folder_outlined)),
+                          ButtonSegment(value: true, label: Text(t.mlf.photos), icon: Icon(Icons.photo_library_outlined)),
                         ],
                         selected: const {false},
                         onSelectionChanged: (sel) => setState(() => _photosMode = sel.first),
@@ -1167,9 +1170,9 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                   _buildSelectionBar(selectedFiles),
                   ..._buildEntryList(),
                 ] else
-                  const Padding(
-                    padding: EdgeInsets.all(16),
-                    child: Center(child: Text('连接远程后在此浏览文件')),
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Center(child: Text(t.mlf.emptyBrowseHint)),
                   ),
                 const Divider(height: 24),
                 _buildQueuePanel(),
@@ -1183,19 +1186,22 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
     return Card(
       child: ListTile(
         leading: Icon(running ? Icons.stop : Icons.play_arrow),
-        title: Text(running ? '停止本机服务' : '启动本机服务（https）'),
+        title: Text(running ? t.mlf.stopServer : t.mlf.startServer),
         subtitle: Text(
           running
-              ? '$_rootPath\nhttps://${_lanIp ?? '127.0.0.1'}:${_server!.port} · '
-                    '指纹 ${_identity!.fingerprint.substring(0, 12)}…'
-              : '共享根：本机收件箱所在目录；自签证书 + 二维码配对',
+              ? t.mlf.serverStatus(
+                  path: _rootPath ?? '',
+                  url: '$_rootPath\nhttps://${_lanIp ?? '127.0.0.1'}:${_server!.port}',
+                  fp: _identity!.fingerprint.substring(0, 12),
+                )
+              : t.mlf.serverHint,
         ),
         isThreeLine: running,
         onTap: () => unawaited(_toggleServer()),
         trailing: running
             ? IconButton(
                 icon: const Icon(Icons.qr_code_2),
-                tooltip: '配对二维码',
+                tooltip: t.mlf.qrTooltip,
                 onPressed: _showPairingQr,
               )
             : null,
@@ -1229,7 +1235,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
           Padding(
             padding: const EdgeInsets.only(bottom: 4),
             child: Text(
-              '附近设备',
+              t.mlf.nearbyDevices,
               style: Theme.of(context).textTheme.labelMedium?.copyWith(
                 color: Theme.of(context).colorScheme.primary,
               ),
@@ -1295,8 +1301,8 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
             Expanded(
               child: TextField(
                 controller: _addressController,
-                decoration: const InputDecoration(
-                  labelText: '配对信息（粘贴或扫码）',
+                decoration: InputDecoration(
+                  labelText: t.mlf.pairingInfoLabel,
                   hintText: '{"v":1,"proto":"mlf",...}',
                 ),
               ),
@@ -1305,12 +1311,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               const SizedBox(width: 8),
               IconButton(
                 icon: const Icon(Icons.qr_code_scanner),
-                tooltip: '扫码配对',
+                tooltip: t.mlf.scanTooltip,
                 onPressed: () => unawaited(_scanAndConnect()),
               ),
             ],
             const SizedBox(width: 8),
-            FilledButton(onPressed: _connect, child: const Text('连接')),
+            FilledButton(onPressed: _connect, child: Text(t.mlf.connect)),
           ],
         ),
         if (_server != null)
@@ -1319,7 +1325,7 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
             child: TextButton.icon(
               onPressed: _connectLocalDemo,
               icon: const Icon(Icons.loop),
-              label: const Text('本机演示（连自己）'),
+              label: Text(t.mlf.localDemo),
             ),
           ),
       ],
@@ -1332,15 +1338,12 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
       color: Theme.of(context).colorScheme.secondaryContainer,
       child: ListTile(
         leading: const Icon(Icons.folder_special),
-        title: const Text('授予「所有文件访问」以共享手机存储'),
-        subtitle: const Text(
-          '未授予时：共享根与收件箱降级为应用私有目录。\n'
-          '系统设置 → 所有文件访问 → 允许 MyLanFiles',
-        ),
+        title: Text(t.mlf.grantAllFilesTitle),
+        subtitle: Text(t.mlf.grantAllFilesBody),
         isThreeLine: true,
         trailing: FilledButton(
           onPressed: () => unawaited(_requestManage()),
-          child: const Text('去授予'),
+          child: Text(t.mlf.grant),
         ),
       ),
     );
@@ -1364,15 +1367,17 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                 }
               }),
               child: Text(
-                _selected.isEmpty || _selected.length < _entries.length - dirCount ? '全选' : '取消全选',
+                _selected.isEmpty || _selected.length < _entries.length - dirCount ? t.mlf.selectAll : t.mlf.deselectAll,
               ),
             ),
             const Spacer(),
             if (selectedFiles.isNotEmpty)
               Text(
-                '已选 ${selectedFiles.length} 个 · '
-                '${formatBytes(selectedFiles.fold(0, (a, f) => a + f.size))} · '
-                '${pickTransferMode(selectedFiles.map((f) => f.size)) == TransferMode.pack ? '打包流' : '逐文件'}',
+                t.mlf.selectedCount(
+                  count: selectedFiles.length,
+                  size: formatBytes(selectedFiles.fold(0, (a, f) => a + f.size)),
+                  mode: pickTransferMode(selectedFiles.map((f) => f.size)) == TransferMode.pack ? t.mlf.packStream : t.mlf.fileByFile,
+                ),
               ),
           ],
         ),
@@ -1380,13 +1385,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
           FilledButton.icon(
             onPressed: _downloadSelected,
             icon: const Icon(Icons.download),
-            label: const Text('下载所选'),
+            label: Text(t.mlf.downloadSelected),
           )
         else
           FilledButton.tonalIcon(
             onPressed: () => unawaited(_pickAndUpload()),
             icon: const Icon(Icons.upload_file),
-            label: Text('上传到 ${_currentPath == '/' ? '根目录' : '当前目录'}'),
+            label: Text(_currentPath == '/' ? t.mlf.uploadToRoot : t.mlf.uploadToCurrent),
           ),
       ],
     );
@@ -1417,13 +1422,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                   onChanged: (_) => _toggleSelect(e),
                 ),
           title: Text(e.name),
-          subtitle: Text(e.isDir ? '目录' : formatBytes(e.size)),
+          subtitle: Text(e.isDir ? t.mlf.dirLabel : formatBytes(e.size)),
           onTap: () => _openEntry(e),
           trailing: e.isDir
               ? null
               : IconButton(
                   icon: const Icon(Icons.download),
-                  tooltip: '下载',
+                  tooltip: t.mlf.downloadTooltip,
                   onPressed: () => _enqueueDownload(e),
                 ),
         ),
@@ -1463,21 +1468,26 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
               children: [
                 const Icon(Icons.swap_vert, size: 18),
                 const SizedBox(width: 4),
-                Text('传输队列（${_queue.activeCount} 活跃 / ${tasks.length} 总计）'),
+                Flexible(
+                  child: Text(
+                    t.mlf.queueTitle(active: _queue.activeCount, total: tasks.length),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
                 const Spacer(),
                 if (tasks.any(
                   (t) => t.state == TransferState.done || t.state == TransferState.failed || t.state == TransferState.canceled,
                 ))
                   TextButton(
                     onPressed: _queue.clearFinished,
-                    child: const Text('清除已完成'),
+                    child: Text(t.mlf.clearDone),
                   ),
               ],
             ),
             if (tasks.isEmpty)
-              const Padding(
-                padding: EdgeInsets.symmetric(vertical: 8),
-                child: Text('暂无传输任务', style: TextStyle(color: Colors.grey)),
+              Padding(
+                padding: const EdgeInsets.symmetric(vertical: 8),
+                child: Text(t.mlf.noTasks, style: const TextStyle(color: Colors.grey)),
               ),
             ...tasks.map(_buildTaskTile),
           ],
@@ -1526,13 +1536,13 @@ class _MyLanFilesBrowsePageState extends State<MyLanFilesBrowsePage> {
                 if (task.state == TransferState.running || task.state == TransferState.queued)
                   IconButton(
                     icon: const Icon(Icons.close, size: 18),
-                    tooltip: '取消（保留断点）',
+                    tooltip: t.mlf.cancelKeepBreakpoint,
                     onPressed: () => task.cancel(),
                   ),
                 if (failed || task.state == TransferState.canceled)
                   IconButton(
                     icon: const Icon(Icons.refresh, size: 18),
-                    tooltip: '重试（断点续传）',
+                    tooltip: t.mlf.retryResume,
                     onPressed: () => _queue.retry(task),
                   ),
               ],

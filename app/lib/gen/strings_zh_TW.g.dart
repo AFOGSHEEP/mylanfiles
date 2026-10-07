@@ -93,6 +93,8 @@ class TranslationsZhTw extends Translations with BaseTranslations<AppLocale, Tra
   late final Translations$web$zh_TW web = Translations$web$zh_TW.internal(_root);
   @override
   late final Translations$assetPicker$zh_TW assetPicker = Translations$assetPicker$zh_TW.internal(_root);
+  @override
+  late final Translations$mlf$zh_TW mlf = Translations$mlf$zh_TW.internal(_root);
 }
 
 // Path: general
@@ -755,6 +757,139 @@ class Translations$assetPicker$zh_TW extends Translations$assetPicker$en {
   String get sNameDurationLabel => '持續時間';
   @override
   String get sUnitAssetCountLabel => '計數';
+}
+
+// Path: mlf
+class Translations$mlf$zh_TW extends Translations$mlf$en {
+  Translations$mlf$zh_TW.internal(TranslationsZhTw root) : this._root = root, super.internal(root);
+
+  final TranslationsZhTw _root; // ignore: unused_field
+
+  // Translations
+  @override
+  String get browseTitle => 'MyLanFiles 瀏覽';
+  @override
+  String get scanPair => '掃碼 / 貼上配對';
+  @override
+  String get pairingInfoLabel => '配對資訊（貼上或掃碼）';
+  @override
+  String get scanTooltip => '掃碼配對';
+  @override
+  String get connect => '連線';
+  @override
+  String get localDemo => '本機示範（連到自己）';
+  @override
+  String get nearbyDevices => '附近裝置';
+  @override
+  String get thisDevice => '本機';
+  @override
+  String get androidDevice => 'Android 裝置';
+  @override
+  String get peer => '對端';
+  @override
+  String get files => '檔案';
+  @override
+  String get photos => '相簿';
+  @override
+  String photosWith({required Object name}) => '相簿 · ${name}';
+  @override
+  String get refresh => '重新整理';
+  @override
+  String get emptyBrowseHint => '連線對端後在此瀏覽檔案';
+  @override
+  String get startServer => '啟動本機伺服器（HTTPS）';
+  @override
+  String get stopServer => '停止本機伺服器';
+  @override
+  String get serverHint => '共用根目錄：本機收件匣所在資料夾；自簽憑證 + QR Code 配對';
+  @override
+  String serverStatus({required Object path, required Object url, required Object fp}) => '${path}\n${url} · 指紋 ${fp}…';
+  @override
+  String get qrTooltip => '配對 QR Code';
+  @override
+  String fingerprintShort({required Object fp}) => '指紋 ${fp}…';
+  @override
+  String get copyPairing => '複製配對資訊';
+  @override
+  String get pairingCopied => '配對資訊已複製';
+  @override
+  String get close => '關閉';
+  @override
+  String get scanTitle => '掃碼配對';
+  @override
+  String cameraUnavailable({required Object error}) => '相機無法使用：${error}';
+  @override
+  String get retry => '重試';
+  @override
+  String get scanHint => '對準另一台裝置顯示的配對 QR Code';
+  @override
+  String get selectAll => '全選';
+  @override
+  String get deselectAll => '取消全選';
+  @override
+  String selectedCount({required Object count, required Object size, required Object mode}) => '已選 ${count} 個 · ${size} · ${mode}';
+  @override
+  String get packStream => '打包串流';
+  @override
+  String get fileByFile => '逐檔傳輸';
+  @override
+  String get downloadSelected => '下載所選';
+  @override
+  String get uploadToRoot => '上傳到根目錄';
+  @override
+  String get uploadToCurrent => '上傳到目前資料夾';
+  @override
+  String get dirLabel => '資料夾';
+  @override
+  String get downloadTooltip => '下載';
+  @override
+  String queueTitle({required Object active, required Object total}) => '傳輸任務（${active} 進行中 / ${total} 總計）';
+  @override
+  String get clearDone => '清除已完成';
+  @override
+  String get noTasks => '目前沒有傳輸任務';
+  @override
+  String get cancelKeepBreakpoint => '取消（保留續傳點）';
+  @override
+  String get retryResume => '重試（續傳）';
+  @override
+  String autoRetry({required Object seconds, required Object attempt, required Object total}) => '失敗，${seconds}s 後自動重試（${attempt}/${total}）';
+  @override
+  String resumeFrom({required Object offset}) => '續傳：從 ${offset} 接著繼續';
+  @override
+  String get remoteChanged => '遠端檔案已變更，重新下載';
+  @override
+  String packLabel({required Object count}) => '打包 ${count} 個檔案';
+  @override
+  String packDetail({required Object added, required Object skipped}) => '新增 ${added} · 已存在跳過 ${skipped}';
+  @override
+  String transferItem({required Object name}) => '正在傳輸 ${name}';
+  @override
+  String verifyFailed({required Object name}) => '${name} 校驗失敗（傳輸損毀）';
+  @override
+  String packDone({required Object received, required Object skipped}) => '新增 ${received} 個 · 略過 ${skipped} 個已存在';
+  @override
+  String albumLoadFailed({required Object error}) => '相簿載入失敗：${error}';
+  @override
+  String bucketLoadFailed({required Object error}) => '媒體分類載入失敗：${error}';
+  @override
+  String get bucketEmpty => '此資料夾沒有媒體檔案';
+  @override
+  String get grantAllFilesTitle => '授予「所有檔案存取權」以共用手機儲存空間';
+  @override
+  String get grantAllFilesBody => '未授予時：共用根目錄與收件匣會降級為應用程式私人資料夾。\n系統設定 → 所有檔案存取權 → 允許 MyLanFiles';
+  @override
+  String get grant => '前往設定';
+  @override
+  String get sendTabEntry => '瀏覽對方檔案 / 相簿';
+  @override
+  String errServerStart({required Object error}) => '伺服器啟動失敗：${error}';
+  @override
+  String errPairFormat({required Object error}) => '配對資訊格式錯誤：${error}';
+  @override
+  String get errNoFingerprint => '缺少憑證指紋——請貼上完整的 QR Code 內容（JSON）';
+  @override
+  String errConnect({required Object error}) => '連線失敗（指紋不符或無法連線）：${error}';
 }
 
 // Path: receiveTab.infoBox

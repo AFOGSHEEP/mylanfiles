@@ -2,6 +2,7 @@ import 'dart:async';
 import 'dart:collection';
 
 import 'package:flutter/foundation.dart';
+import 'package:localsend_app/gen/strings.g.dart';
 
 /// Transfer mode chosen for a multi-file download (交接文档 §4.2 自适应规则:
 /// 中位文件 < 2 MiB 走打包流,否则逐文件——后者可享受单文件 Range 续传).
@@ -176,8 +177,7 @@ class TransferQueue extends ChangeNotifier {
               ..state = TransferState.queued
               ..notBefore = DateTime.now().add(delay)
               ..setDetail(
-                '失败，${delay.inSeconds}s 后自动重试'
-                '（${next.autoRetries}/${_backoffSchedule.length}）',
+                t.mlf.autoRetry(seconds: delay.inSeconds, attempt: next.autoRetries, total: _backoffSchedule.length),
               )
               ..error = '$e';
             debugPrint('TransferQueue: auto-retry "${next.label}" in $delay');

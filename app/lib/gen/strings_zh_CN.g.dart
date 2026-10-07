@@ -95,6 +95,8 @@ class TranslationsZhCn extends Translations with BaseTranslations<AppLocale, Tra
   late final Translations$web$zh_CN web = Translations$web$zh_CN.internal(_root);
   @override
   late final Translations$assetPicker$zh_CN assetPicker = Translations$assetPicker$zh_CN.internal(_root);
+  @override
+  late final Translations$mlf$zh_CN mlf = Translations$mlf$zh_CN.internal(_root);
 }
 
 // Path: general
@@ -838,6 +840,139 @@ class Translations$assetPicker$zh_CN extends Translations$assetPicker$en {
   String get sNameDurationLabel => '时长';
   @override
   String get sUnitAssetCountLabel => '计数';
+}
+
+// Path: mlf
+class Translations$mlf$zh_CN extends Translations$mlf$en {
+  Translations$mlf$zh_CN.internal(TranslationsZhCn root) : this._root = root, super.internal(root);
+
+  final TranslationsZhCn _root; // ignore: unused_field
+
+  // Translations
+  @override
+  String get browseTitle => 'MyLanFiles 浏览';
+  @override
+  String get scanPair => '扫码 / 粘贴配对';
+  @override
+  String get pairingInfoLabel => '配对信息（粘贴或扫码）';
+  @override
+  String get scanTooltip => '扫码配对';
+  @override
+  String get connect => '连接';
+  @override
+  String get localDemo => '本机演示（连自己）';
+  @override
+  String get nearbyDevices => '附近设备';
+  @override
+  String get thisDevice => '本机';
+  @override
+  String get androidDevice => 'Android 设备';
+  @override
+  String get peer => '对端';
+  @override
+  String get files => '文件';
+  @override
+  String get photos => '相册';
+  @override
+  String photosWith({required Object name}) => '相册 · ${name}';
+  @override
+  String get refresh => '刷新';
+  @override
+  String get emptyBrowseHint => '连接远程后在此浏览文件';
+  @override
+  String get startServer => '启动本机服务（https）';
+  @override
+  String get stopServer => '停止本机服务';
+  @override
+  String get serverHint => '共享根：本机收件箱所在目录；自签证书 + 二维码配对';
+  @override
+  String get qrTooltip => '配对二维码';
+  @override
+  String fingerprintShort({required Object fp}) => '指纹 ${fp}…';
+  @override
+  String get copyPairing => '复制配对信息';
+  @override
+  String get pairingCopied => '配对信息已复制';
+  @override
+  String get close => '关闭';
+  @override
+  String get scanTitle => '扫码配对';
+  @override
+  String cameraUnavailable({required Object error}) => '相机不可用：${error}';
+  @override
+  String get retry => '重试';
+  @override
+  String get scanHint => '对准服务端展示的配对二维码';
+  @override
+  String get selectAll => '全选';
+  @override
+  String get deselectAll => '取消全选';
+  @override
+  String selectedCount({required Object count, required Object size, required Object mode}) => '已选 ${count} 个 · ${size} · ${mode}';
+  @override
+  String get packStream => '打包流';
+  @override
+  String get fileByFile => '逐文件';
+  @override
+  String get downloadSelected => '下载所选';
+  @override
+  String get uploadToRoot => '上传到根目录';
+  @override
+  String get uploadToCurrent => '上传到当前目录';
+  @override
+  String get dirLabel => '目录';
+  @override
+  String get downloadTooltip => '下载';
+  @override
+  String queueTitle({required Object active, required Object total}) => '传输队列（${active} 活跃 / ${total} 总计）';
+  @override
+  String get clearDone => '清除已完成';
+  @override
+  String get noTasks => '暂无传输任务';
+  @override
+  String get cancelKeepBreakpoint => '取消（保留断点）';
+  @override
+  String get retryResume => '重试（断点续传）';
+  @override
+  String autoRetry({required Object seconds, required Object attempt, required Object total}) => '失败，${seconds}s 后自动重试（${attempt}/${total}）';
+  @override
+  String resumeFrom({required Object offset}) => '断点续传：从 ${offset} 处继续';
+  @override
+  String get remoteChanged => '远端文件已变化，重新下载';
+  @override
+  String packLabel({required Object count}) => '打包 ${count} 个文件';
+  @override
+  String packDetail({required Object added, required Object skipped}) => '新增 ${added} · 已有跳过 ${skipped}';
+  @override
+  String transferItem({required Object name}) => '正在 ${name}';
+  @override
+  String verifyFailed({required Object name}) => '${name} 校验失败（传输损坏）';
+  @override
+  String packDone({required Object received, required Object skipped}) => '新增 ${received} 个 · 跳过 ${skipped} 个已存在';
+  @override
+  String albumLoadFailed({required Object error}) => '相册加载失败: ${error}';
+  @override
+  String bucketLoadFailed({required Object error}) => '桶加载失败: ${error}';
+  @override
+  String get bucketEmpty => '该文件夹没有媒体文件';
+  @override
+  String get grantAllFilesTitle => '授予「所有文件访问」以共享手机存储';
+  @override
+  String get grantAllFilesBody => '未授予时：共享根与收件箱降级为应用私有目录。\n系统设置 → 所有文件访问 → 允许 MyLanFiles';
+  @override
+  String get grant => '去授予';
+  @override
+  String get sendTabEntry => '浏览对端文件 / 相册';
+  @override
+  String errServerStart({required Object error}) => '服务启动失败: ${error}';
+  @override
+  String errPairFormat({required Object error}) => '配对信息格式错误: ${error}';
+  @override
+  String get errNoFingerprint => '缺少证书指纹——请粘贴完整二维码内容（JSON）';
+  @override
+  String errConnect({required Object error}) => '连接失败（指纹不匹配或不可达）: ${error}';
+  @override
+  String serverStatus({required Object path, required Object url, required Object fp}) => '${path}\n${url} · 指纹 ${fp}…';
 }
 
 // Path: receiveTab.infoBox

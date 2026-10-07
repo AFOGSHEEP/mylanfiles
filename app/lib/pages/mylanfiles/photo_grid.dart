@@ -1,9 +1,11 @@
-import 'dart:async';
-import 'dart:typed_data';
-
 import 'package:flutter/material.dart';
+import 'package:localsend_app/gen/strings.g.dart';
 import 'package:mylanfiles_core/mylanfiles_core.dart';
 import 'package:mylanfiles_server/mylanfiles_server.dart';
+
+
+import 'dart:async';
+import 'dart:typed_data';
 
 /// 相册网格视图（§4.1 media/list + /thumb 消费方）。
 ///
@@ -61,7 +63,7 @@ class _MlfPhotoGridState extends State<MlfPhotoGrid> {
       }
     } on Object catch (e) {
       setState(() {
-        _error = '相册加载失败: $e';
+        _error = t.mlf.albumLoadFailed(error: e.toString());
         _loading = false;
       });
     }
@@ -85,7 +87,7 @@ class _MlfPhotoGridState extends State<MlfPhotoGrid> {
       unawaited(_prefetchAll());
     } on Object catch (e) {
       setState(() {
-        _error = '桶加载失败: $e';
+        _error = t.mlf.bucketLoadFailed(error: e.toString());
         _loading = false;
       });
     }
@@ -158,7 +160,7 @@ class _MlfPhotoGridState extends State<MlfPhotoGrid> {
         if (_loading) const LinearProgressIndicator(minHeight: 2),
         Expanded(
           child: _entries.isEmpty && !_loading
-              ? const Center(child: Text('该桶没有媒体文件'))
+              ? Center(child: Text(t.mlf.bucketEmpty))
               : GridView.builder(
                   gridDelegate: const SliverGridDelegateWithFixedCrossAxisCount(
                     crossAxisCount: 3,

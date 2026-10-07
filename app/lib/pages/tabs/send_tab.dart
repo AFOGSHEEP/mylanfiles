@@ -239,7 +239,7 @@ class SendTab extends StatelessWidget {
                   await context.push(() => const MyLanFilesBrowsePage());
                 },
                 icon: const Icon(Icons.folder_shared_outlined),
-                label: const Text('浏览对端文件 / 相册'),
+                label: Text(t.mlf.sendTabEntry),
               ),
             ),
             Center(

@@ -73,6 +73,7 @@ class Translations with BaseTranslations<AppLocale, Translations> {
   late final Translations$tray$en tray = Translations$tray$en.internal(_root);
   late final Translations$web$en web = Translations$web$en.internal(_root);
   late final Translations$assetPicker$en assetPicker = Translations$assetPicker$en.internal(_root);
+  late final Translations$mlf$en mlf = Translations$mlf$en.internal(_root);
 }
 
 // Path: general
@@ -945,6 +946,203 @@ class Translations$assetPicker$en {
 
   /// en: 'count'
   String get sUnitAssetCountLabel => 'count';
+}
+
+// Path: mlf
+class Translations$mlf$en {
+  Translations$mlf$en.internal(this._root);
+
+  final Translations _root; // ignore: unused_field
+
+  // Translations
+
+  /// en: 'MyLanFiles'
+  String get browseTitle => 'MyLanFiles';
+
+  /// en: 'Scan / paste pairing'
+  String get scanPair => 'Scan / paste pairing';
+
+  /// en: 'Pairing info (paste or scan)'
+  String get pairingInfoLabel => 'Pairing info (paste or scan)';
+
+  /// en: 'Scan pairing QR'
+  String get scanTooltip => 'Scan pairing QR';
+
+  /// en: 'Connect'
+  String get connect => 'Connect';
+
+  /// en: 'Local demo (connect to self)'
+  String get localDemo => 'Local demo (connect to self)';
+
+  /// en: 'Nearby devices'
+  String get nearbyDevices => 'Nearby devices';
+
+  /// en: 'This device'
+  String get thisDevice => 'This device';
+
+  /// en: 'Android device'
+  String get androidDevice => 'Android device';
+
+  /// en: 'Peer'
+  String get peer => 'Peer';
+
+  /// en: 'Files'
+  String get files => 'Files';
+
+  /// en: 'Photos'
+  String get photos => 'Photos';
+
+  /// en: 'Photos · {name}'
+  String photosWith({required Object name}) => 'Photos · ${name}';
+
+  /// en: 'Refresh'
+  String get refresh => 'Refresh';
+
+  /// en: 'Connect to a peer to browse its files'
+  String get emptyBrowseHint => 'Connect to a peer to browse its files';
+
+  /// en: 'Start local server (HTTPS)'
+  String get startServer => 'Start local server (HTTPS)';
+
+  /// en: 'Stop local server'
+  String get stopServer => 'Stop local server';
+
+  /// en: 'Shared root: the directory of the local inbox. Self-signed certificate + QR pairing.'
+  String get serverHint => 'Shared root: the directory of the local inbox. Self-signed certificate + QR pairing.';
+
+  /// en: 'Pairing QR code'
+  String get qrTooltip => 'Pairing QR code';
+
+  /// en: 'Fingerprint {fp}…'
+  String fingerprintShort({required Object fp}) => 'Fingerprint ${fp}…';
+
+  /// en: 'Copy pairing info'
+  String get copyPairing => 'Copy pairing info';
+
+  /// en: 'Pairing info copied'
+  String get pairingCopied => 'Pairing info copied';
+
+  /// en: 'Close'
+  String get close => 'Close';
+
+  /// en: 'Scan to pair'
+  String get scanTitle => 'Scan to pair';
+
+  /// en: 'Camera unavailable: {error}'
+  String cameraUnavailable({required Object error}) => 'Camera unavailable: ${error}';
+
+  /// en: 'Retry'
+  String get retry => 'Retry';
+
+  /// en: 'Point at the QR code shown on the other device'
+  String get scanHint => 'Point at the QR code shown on the other device';
+
+  /// en: 'Select all'
+  String get selectAll => 'Select all';
+
+  /// en: 'Deselect all'
+  String get deselectAll => 'Deselect all';
+
+  /// en: '{count} selected · {size} · {mode}'
+  String selectedCount({required Object count, required Object size, required Object mode}) => '${count} selected · ${size} · ${mode}';
+
+  /// en: 'pack stream'
+  String get packStream => 'pack stream';
+
+  /// en: 'file-by-file'
+  String get fileByFile => 'file-by-file';
+
+  /// en: 'Download selected'
+  String get downloadSelected => 'Download selected';
+
+  /// en: 'Upload to root'
+  String get uploadToRoot => 'Upload to root';
+
+  /// en: 'Upload to current folder'
+  String get uploadToCurrent => 'Upload to current folder';
+
+  /// en: 'Folder'
+  String get dirLabel => 'Folder';
+
+  /// en: 'Download'
+  String get downloadTooltip => 'Download';
+
+  /// en: 'Transfers ({active} active / {total} total)'
+  String queueTitle({required Object active, required Object total}) => 'Transfers (${active} active / ${total} total)';
+
+  /// en: 'Clear finished'
+  String get clearDone => 'Clear finished';
+
+  /// en: 'No transfers yet'
+  String get noTasks => 'No transfers yet';
+
+  /// en: 'Cancel (keep resume point)'
+  String get cancelKeepBreakpoint => 'Cancel (keep resume point)';
+
+  /// en: 'Retry (resume)'
+  String get retryResume => 'Retry (resume)';
+
+  /// en: 'Failed, retrying in {seconds}s ({attempt}/{total})'
+  String autoRetry({required Object seconds, required Object attempt, required Object total}) =>
+      'Failed, retrying in ${seconds}s (${attempt}/${total})';
+
+  /// en: 'Resuming from {offset}'
+  String resumeFrom({required Object offset}) => 'Resuming from ${offset}';
+
+  /// en: 'Remote file changed, downloading again'
+  String get remoteChanged => 'Remote file changed, downloading again';
+
+  /// en: 'Pack {count} files'
+  String packLabel({required Object count}) => 'Pack ${count} files';
+
+  /// en: '{added} new · {skipped} already present'
+  String packDetail({required Object added, required Object skipped}) => '${added} new · ${skipped} already present';
+
+  /// en: 'Transferring {name}'
+  String transferItem({required Object name}) => 'Transferring ${name}';
+
+  /// en: '{name} failed verification (corrupted transfer)'
+  String verifyFailed({required Object name}) => '${name} failed verification (corrupted transfer)';
+
+  /// en: '{received} new · {skipped} skipped (already exist)'
+  String packDone({required Object received, required Object skipped}) => '${received} new · ${skipped} skipped (already exist)';
+
+  /// en: 'Failed to load album: {error}'
+  String albumLoadFailed({required Object error}) => 'Failed to load album: ${error}';
+
+  /// en: 'Failed to load bucket: {error}'
+  String bucketLoadFailed({required Object error}) => 'Failed to load bucket: ${error}';
+
+  /// en: 'No media in this folder'
+  String get bucketEmpty => 'No media in this folder';
+
+  /// en: 'Grant "All files access" to share phone storage'
+  String get grantAllFilesTitle => 'Grant "All files access" to share phone storage';
+
+  /// en: 'Without it, the shared root and inbox fall back to the app's private directory. System settings → All files access → allow MyLanFiles'
+  String get grantAllFilesBody =>
+      'Without it, the shared root and inbox fall back to the app\'s private directory.\nSystem settings → All files access → allow MyLanFiles';
+
+  /// en: 'Open settings'
+  String get grant => 'Open settings';
+
+  /// en: 'Browse peer files / photos'
+  String get sendTabEntry => 'Browse peer files / photos';
+
+  /// en: 'Failed to start server: {error}'
+  String errServerStart({required Object error}) => 'Failed to start server: ${error}';
+
+  /// en: 'Invalid pairing info: {error}'
+  String errPairFormat({required Object error}) => 'Invalid pairing info: ${error}';
+
+  /// en: 'Missing certificate fingerprint — paste the full QR code content (JSON)'
+  String get errNoFingerprint => 'Missing certificate fingerprint — paste the full QR code content (JSON)';
+
+  /// en: 'Connection failed (fingerprint mismatch or unreachable): {error}'
+  String errConnect({required Object error}) => 'Connection failed (fingerprint mismatch or unreachable): ${error}';
+
+  /// en: '{path} {url} · Fingerprint {fp}…'
+  String serverStatus({required Object path, required Object url, required Object fp}) => '${path}\n${url} · Fingerprint ${fp}…';
 }
 
 // Path: receiveTab.infoBox
