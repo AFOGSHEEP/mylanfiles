@@ -8,7 +8,7 @@
 
 > 每次会话结束更新。结构：当前阶段 / 已完成 / 下一步 / 待决策人确认事项。
 
-- 更新：2026-10-05（R7 补充轮——大众化自动发现 + 传输算法优化，决策人两项目标驱动；研究笔记 docs/research/transfer-optimization.md）
+- 更新：2026-10-07（R8——MyLanFiles UI 全面 i18n：mlf 命名空间 62 键 × en/zh-CN/zh-TW/zh-HK，其余 55 语言回退 en；GitHub 发布与博客侧线已完成）
 - 本机项目根：`F:\MyLanFiles`
 - 正式仓库：`F:\MyLanFiles\repo`（分支 `feat/p1-vfs-server`，本地 20+ 提交待推送）
 
@@ -78,13 +78,21 @@ F:\bin\gh.exe auth login --hostname github.com
 6. **WS6 三 agent 回归**：相册 E2E（原图 PASS；缩略图 6/20 停滞=懒加载语义→催生预取改进）；对抗轮3 7/8（size 越界/write offset 契约/token 编码已修，R-016）；重启矩阵 3/3 PASS
 7. 测试：core 46 + server 41 + queue 10 = **97 全绿**；本轮 7 提交
 
+## R8 已完成（i18n 轮）
+
+- **mlf 命名空间**：上游 slang 体系（base en + fallback base_locale）加 `mlf` 段 62 键 × en/zh-CN/zh-TW/zh-HK（TW/HK 人工定稿：佇列→傳輸任務/隊列、憑證/證書差異化、打包串流、共用、前往設定/授權）；其余 55 语言自动回退英文
+- **全部 UI 硬编码中文清零**（浏览页/相册/队列/扫码页/发送页入口 ~50 处；`[MLF]` E2E 日志与注释保留中文属有意）
+- **接入决策注记**：此前「故意不依赖上游 i18n」的隔离方针在 UI 文案维度反转（走 `t.mlf.*`），已在代码注释与本文件记录；fork 卫生代价 = 4 个上游 json 各 +62 行尾部追加（ADR-0001 PR 清单须列明）
+- **多 agent 独立验证**：A 完整性（0 残留/四语言键全等/插值参数全匹配/slang 幂等 md5 全等）；B 渲染（en/zh-CN/zh-TW/HK widget test 9/9，400px 真实字体无溢出；slang deferred 加载坑：widget test 需 setUpAll 真实 async loadLocale 预载）；C 对抗（抓出简繁转换 24 处简体残留+「續傳续传」重复词→已人工重写修复）
+- 基线：analyze 0 error + core 49 / server 42 / app 82 全绿
+
 ## 下次会话计划（P1 收尾 → 体验层）
 
-1. **相册浏览 UI**：浏览页接 media/list（桶切换 + 缩略图网格）；/thumb 端点（token 防穿越）
-2. **扫码相机真机验证**（需你在场）+ 上游互传验收
-3. 队列取消按钮真机、`.part` 超龄清理策略
-4. MediaStore 原生通道 vs 目录桶真机 A/B（决定是否值得上平台通道）
-5. （可选）正式共享根用户可选（现在 Android=全存储、桌面=Downloads，应做成设置）
+1. **扫码相机真机验证**（需你在场）+ 上游互传验收
+2. 队列取消按钮真机、`.part` 超龄清理策略
+3. MediaStore 原生通道 vs 目录桶真机 A/B（决定是否值得上平台通道）
+4. （可选）共享根用户可选设置（现在 Android=全存储、桌面=Downloads）
+5. （候选）HEIC 缩略图、原生解码 10×、FTS5 搜索、FastCDC 增量同步、QUIC
 
 ## 环境速查（累积更新）
 
